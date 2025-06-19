@@ -33,16 +33,16 @@ bootstrap
 .env
 .env.local
 .env.*
-client/.env
-client/.env.local
-client/.env.*
+*/.env
+*/.env.local
+*/.env.*
 
 # TypeScript
 *.js.map
 # *.d.ts
-client/dist/
-client/node_modules/
-client/.vite/
-client/coverage/
-client/.DS_Store
-!client/src/vite-env.d.ts
+*/dist/
+*/node_modules/
+*/.vite/
+*/coverage/
+*/.DS_Store
+!*/src/vite-env.d.ts
