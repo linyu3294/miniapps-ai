@@ -165,6 +165,7 @@ resource "aws_apigatewayv2_stage" "default" {
 # ---------------------------------------------
 resource "aws_lambda_function" "publisher" {
   filename         = "${path.module}/lambda/publisher/publisher.zip"
+  source_code_hash = filebase64sha256("${path.module}/lambda/publisher/publisher.zip")
   function_name    = "${var.project_name}-publisher-${var.environment}"
   role            = aws_iam_role.lambda_app_exec.arn
   handler         = "publisher"
