@@ -48,9 +48,15 @@ const AuthComponent = (): React.JSX.Element => {
   };
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
+    const { name, value } = e.target;
+    console.log('Input change:', name, value);
+    setFormData(prev => {
+      const newState = {
+        ...prev,
+        [name]: value
+      };
+      console.log('New form state:', newState);
+      return newState;
     });
     setError('');
   };
@@ -179,7 +185,6 @@ const AuthComponent = (): React.JSX.Element => {
         {isConfirming ? (
           <form onSubmit={handleConfirmSignUp}>
             <div className="form-group">
-              <label>Email:</label>
               <input
                 type="email"
                 name="email"
@@ -190,7 +195,6 @@ const AuthComponent = (): React.JSX.Element => {
               />
             </div>
             <div className="form-group">
-              <label>Verification Code:</label>
               <input
                 type="text"
                 name="confirmationCode"
@@ -213,7 +217,6 @@ const AuthComponent = (): React.JSX.Element => {
         ) : (
           <form onSubmit={isSignUp ? handleSignUp : handleSignIn}>
             <div className="form-group">
-              <label>Email:</label>
               <input
                 type="email"
                 name="email"
@@ -224,7 +227,6 @@ const AuthComponent = (): React.JSX.Element => {
               />
             </div>
             <div className="form-group">
-              <label>Password:</label>
               <input
                 type="password"
                 name="password"
@@ -236,7 +238,6 @@ const AuthComponent = (): React.JSX.Element => {
             </div>
             {isSignUp && (
               <div className="form-group">
-                <label>Confirm Password:</label>
                 <input
                   type="password"
                   name="confirmPassword"
