@@ -97,77 +97,130 @@ resource "aws_apigatewayv2_stage" "default" {
 # ---------------------------------------------
 # CloudFront Distribution for S3 Bucket
 # ---------------------------------------------
-resource "aws_cloudfront_origin_access_identity" "apps_oai" {
-  comment = "OAI for apps S3 bucket"
-}
 
-resource "aws_s3_bucket_policy" "apps_policy" {
-  bucket = aws_s3_bucket.apps.id
-  policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect = "Allow",
-        Principal = {
-          AWS = aws_cloudfront_origin_access_identity.apps_oai.iam_arn
-        },
-        Action = "s3:GetObject",
-        Resource = "${aws_s3_bucket.apps.arn}/*"
-      }
-    ]
-  })
-}
-
-resource "aws_cloudfront_distribution" "apps_distribution" {
-  enabled             = true
-  is_ipv6_enabled     = true
-  comment             = "Apps static assets distribution"
-  default_root_object = "index.html"
-
-  origin {
-    domain_name = aws_s3_bucket.apps.bucket_regional_domain_name
-    origin_id   = "appsS3Origin"
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.apps_oai.cloudfront_access_identity_path
-    }
-  }
-
-  default_cache_behavior {
-    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
-    cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "appsS3Origin"
-    viewer_protocol_policy = "redirect-to-https"
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-  }
-
-  price_class = "PriceClass_100"
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-  viewer_certificate {
-    cloudfront_default_certificate = true
-  }
-  tags = local.tags
-}
+# resource "aws_cloudfront_origin_access_identity" "apps_oai" {
+#   comment = "OAI for apps S3 bucket"
+# }
+# 
+# resource "aws_s3_bucket_policy" "apps_policy" {
+#   bucket = aws_s3_bucket.apps.id
+#   policy = jsonencode({
+#     Version = "2012-10-17",
+#     Statement = [
+#       {
+#         Effect = "Allow",
+#         Principal = {
+#           AWS = aws_cloudfront_origin_access_identity.apps_oai.iam_arn
+#         },
+#         Action = "s3:GetObject",
+#         Resource = "${aws_s3_bucket.apps.arn}/*"
+#       }
+#     ]
+#   })
+# }
+# 
+# resource "aws_cloudfront_distribution" "apps_distribution" {
+#   enabled             = true
+#   is_ipv6_enabled     = true
+#   comment             = "Apps static assets distribution"
+#   default_root_object = "index.html"
+# 
+#   origin {
+#     domain_name = aws_s3_bucket.apps.bucket_regional_domain_name
+#     origin_id   = "appsS3Origin"
+#     s3_origin_config {
+#       origin_access_identity = aws_cloudfront_origin_access_identity.apps_oai.cloudfront_access_identity_path
+#     }
+#   }
+# 
+#   default_cache_behavior {
+#     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+#     cached_methods   = ["GET", "HEAD"]
+#     target_origin_id = "appsS3Origin"
+#     viewer_protocol_policy = "redirect-to-https"
+#     forwarded_values {
+#       query_string = false
+#       cookies {
+#         forward = "none"
+#       }
+#     }
+#   }
+# 
+#   price_class = "PriceClass_100"
+#   restrictions {
+#     geo_restriction {
+#       restriction_type = "none"
+#     }
+#   }
+#   viewer_certificate {
+#     cloudfront_default_certificate = true
+#   }
+#   tags = local.tags
+# }
 
 # ---------------------------------------------
 # Route 53 Record for CloudFront
 # ---------------------------------------------
-resource "aws_route53_record" "apps" {
-  zone_id = var.route53_zone_id
-  name    = var.apps_domain
-  type    = "A"
-  alias {
-    name                   = aws_cloudfront_distribution.apps_distribution.domain_name
-    zone_id                = aws_cloudfront_distribution.apps_distribution.hosted_zone_id
-    evaluate_target_health = false
+
+# resource "aws_route53_record" "apps" {
+#   zone_id = var.route53_zone_id
+#   name    = var.apps_domain
+#   type    = "A"
+#   alias {
+#     name                   = aws_cloudfront_distribution.apps_distribution.domain_name
+#     zone_id                = aws_cloudfront_distribution.apps_distribution.hosted_zone_id
+#     evaluate_target_health = false
+#   }
+# }
+
+# ---------------------------------------------
+# Cognito User Pool for Authentication
+# ---------------------------------------------
+resource "aws_cognito_user_pool" "publisher_pool" {
+  name = "${var.project_name}-publisher-pool-${var.environment}"
+
+  password_policy {
+    minimum_length    = 8
+    require_lowercase = true
+    require_numbers   = true
+    require_symbols   = true
+    require_uppercase = true
   }
+
+  auto_verified_attributes = ["email"]
+
+  verification_message_template {
+    default_email_option = "CONFIRM_WITH_CODE"
+  }
+
+  email_configuration {
+    email_sending_account = "COGNITO_DEFAULT"
+  }
+
+  tags = local.tags
+}
+
+# Cognito User Pool Client
+resource "aws_cognito_user_pool_client" "publisher_client" {
+  name         = "${var.project_name}-publisher-client-${var.environment}"
+  user_pool_id = aws_cognito_user_pool.publisher_pool.id
+
+  generate_secret = false
+
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH"
+  ]
+
+  supported_identity_providers = ["COGNITO"]
+}
+
+# Publisher Group
+resource "aws_cognito_user_group" "publisher_group" {
+  name         = "publishers"
+  user_pool_id = aws_cognito_user_pool.publisher_pool.id
+  description  = "Publisher users"
+  precedence   = 1
 }
 

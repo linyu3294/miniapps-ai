@@ -3,15 +3,15 @@ output "s3_bucket_name" {
   value       = aws_s3_bucket.apps.bucket
 }
 
-output "cloudfront_distribution_id" {
-  description = "ID of the CloudFront distribution"
-  value       = aws_cloudfront_distribution.apps_distribution.id
-}
+# output "cloudfront_distribution_id" {
+#   description = "ID of the CloudFront distribution"
+#   value       = aws_cloudfront_distribution.apps_distribution.id
+# }
 
-output "cloudfront_domain_name" {
-  description = "Domain name of the CloudFront distribution"
-  value       = aws_cloudfront_distribution.apps_distribution.domain_name
-}
+# output "cloudfront_domain_name" {
+#   description = "Domain name of the CloudFront distribution"
+#   value       = aws_cloudfront_distribution.apps_distribution.domain_name
+# }
 
 output "api_gateway_url" {
   description = "URL of the API Gateway endpoint"
