@@ -1,5 +1,5 @@
 import React, { useState, useEffect, FormEvent, ChangeEvent } from 'react';
-import { signUp, signIn, signOut, confirmSignUp, resendSignUpCode, getCurrentUser } from 'aws-amplify/auth';
+import { signUp, signIn, signOut, confirmSignUp, resendSignUpCode, getCurrentUser, fetchUserAttributes, fetchAuthSession } from 'aws-amplify/auth';
 import './Auth.css';
 
 interface FormData {
@@ -12,6 +12,7 @@ interface FormData {
 interface CognitoUser {
   username: string;
   userId: string;
+  groups?: string[];
   signInDetails?: {
     loginId?: string;
   };
@@ -22,6 +23,7 @@ const AuthComponent = (): React.JSX.Element => {
   const [user, setUser] = useState<CognitoUser | null>(null);
   const [isSignUp, setIsSignUp] = useState<boolean>(false);
   const [isConfirming, setIsConfirming] = useState<boolean>(false);
+  const [isPublisher, setIsPublisher] = useState<boolean>(false);
   const [formData, setFormData] = useState<FormData>({
     email: '',
     password: '',
@@ -37,12 +39,28 @@ const AuthComponent = (): React.JSX.Element => {
 
   const checkAuthState = async (): Promise<void> => {
     try {
-      const user = await getCurrentUser();
+      const currentUser = await getCurrentUser();
+      const userAttributes = await fetchUserAttributes();
+      const session = await fetchAuthSession();
+      
+      // Get user groups from the access token
+      const accessToken = session.tokens?.accessToken.toString() || '';
+      const payload = accessToken ? JSON.parse(atob(accessToken.split('.')[1])) : {};
+      const groups = payload['cognito:groups'] || [];
+      
       setIsAuthenticated(true);
-      setUser(user);
+      setUser({
+        ...currentUser,
+        groups,
+        signInDetails: {
+          loginId: userAttributes.email
+        }
+      });
+      setIsPublisher(groups.includes('Publisher'));
     } catch (error) {
       setIsAuthenticated(false);
       setUser(null);
+      setIsPublisher(false);
       console.error(error);
     }
   };
@@ -164,6 +182,7 @@ const AuthComponent = (): React.JSX.Element => {
           <div className="user-info">
             <p><strong>User ID:</strong> {user.userId}</p>
             <p><strong>Email:</strong> {user.signInDetails?.loginId}</p>
+            <p><strong>Role:</strong> {isPublisher ? 'Publisher' : 'User'}</p>
           </div>
           <button onClick={handleSignOut} className="auth-button signout">
             Sign Out

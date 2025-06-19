@@ -45,139 +45,10 @@ resource "aws_s3_bucket" "apps" {
 }
 
 # ---------------------------------------------
-# Lambda Function for API
-# ---------------------------------------------
-resource "aws_lambda_function" "subscriber_api" {
-  function_name = "${var.project_name}-subscriber-api-${var.environment}"
-  role          = aws_iam_role.lambda_app_exec.arn
-  handler       = "bootstrap"
-  runtime       = "provided.al2"
-  filename      = "${path.module}/lambda/publisher/publisher.zip"
-  source_code_hash = filebase64sha256("${path.module}/lambda/publisher/publisher.zip")
-  tags          = local.tags
-}
-
-# ---------------------------------------------
-# API Gateway V2 (HTTP API)
-# ---------------------------------------------
-resource "aws_apigatewayv2_api" "subscriber_api" {
-  name          = "${var.project_name}-subscriber-api-${var.environment}"
-  protocol_type = "HTTP"
-  tags          = local.tags
-}
-
-resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id                 = aws_apigatewayv2_api.subscriber_api.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.subscriber_api.invoke_arn
-  integration_method     = "POST"
-  payload_format_version = "2.0"
-}
-
-resource "aws_apigatewayv2_route" "default_route" {
-  api_id    = aws_apigatewayv2_api.subscriber_api.id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-resource "aws_lambda_permission" "apigw_lambda" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.subscriber_api.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.subscriber_api.execution_arn}/*/*"
-}
-
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.subscriber_api.id
-  name        = "$default"
-  auto_deploy = true
-}
-
-# ---------------------------------------------
-# CloudFront Distribution for S3 Bucket
-# ---------------------------------------------
-
-# resource "aws_cloudfront_origin_access_identity" "apps_oai" {
-#   comment = "OAI for apps S3 bucket"
-# }
-# 
-# resource "aws_s3_bucket_policy" "apps_policy" {
-#   bucket = aws_s3_bucket.apps.id
-#   policy = jsonencode({
-#     Version = "2012-10-17",
-#     Statement = [
-#       {
-#         Effect = "Allow",
-#         Principal = {
-#           AWS = aws_cloudfront_origin_access_identity.apps_oai.iam_arn
-#         },
-#         Action = "s3:GetObject",
-#         Resource = "${aws_s3_bucket.apps.arn}/*"
-#       }
-#     ]
-#   })
-# }
-# 
-# resource "aws_cloudfront_distribution" "apps_distribution" {
-#   enabled             = true
-#   is_ipv6_enabled     = true
-#   comment             = "Apps static assets distribution"
-#   default_root_object = "index.html"
-# 
-#   origin {
-#     domain_name = aws_s3_bucket.apps.bucket_regional_domain_name
-#     origin_id   = "appsS3Origin"
-#     s3_origin_config {
-#       origin_access_identity = aws_cloudfront_origin_access_identity.apps_oai.cloudfront_access_identity_path
-#     }
-#   }
-# 
-#   default_cache_behavior {
-#     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
-#     cached_methods   = ["GET", "HEAD"]
-#     target_origin_id = "appsS3Origin"
-#     viewer_protocol_policy = "redirect-to-https"
-#     forwarded_values {
-#       query_string = false
-#       cookies {
-#         forward = "none"
-#       }
-#     }
-#   }
-# 
-#   price_class = "PriceClass_100"
-#   restrictions {
-#     geo_restriction {
-#       restriction_type = "none"
-#     }
-#   }
-#   viewer_certificate {
-#     cloudfront_default_certificate = true
-#   }
-#   tags = local.tags
-# }
-
-# ---------------------------------------------
-# Route 53 Record for CloudFront
-# ---------------------------------------------
-
-# resource "aws_route53_record" "apps" {
-#   zone_id = var.route53_zone_id
-#   name    = var.apps_domain
-#   type    = "A"
-#   alias {
-#     name                   = aws_cloudfront_distribution.apps_distribution.domain_name
-#     zone_id                = aws_cloudfront_distribution.apps_distribution.hosted_zone_id
-#     evaluate_target_health = false
-#   }
-# }
-
-# ---------------------------------------------
 # Cognito User Pool for Authentication
 # ---------------------------------------------
-resource "aws_cognito_user_pool" "publisher_pool" {
-  name = "${var.project_name}-publisher-pool-${var.environment}"
+resource "aws_cognito_user_pool" "main" {
+  name = "${var.project_name}-user-pool-${var.environment}"
 
   password_policy {
     minimum_length    = 8
@@ -187,40 +58,145 @@ resource "aws_cognito_user_pool" "publisher_pool" {
     require_uppercase = true
   }
 
+  username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
 
   verification_message_template {
     default_email_option = "CONFIRM_WITH_CODE"
   }
 
-  email_configuration {
-    email_sending_account = "COGNITO_DEFAULT"
+  schema {
+    attribute_data_type = "String"
+    name               = "email"
+    required           = true
+    mutable           = true
+
+    string_attribute_constraints {
+      min_length = 7
+      max_length = 256
+    }
   }
 
   tags = local.tags
 }
 
-# Cognito User Pool Client
-resource "aws_cognito_user_pool_client" "publisher_client" {
-  name         = "${var.project_name}-publisher-client-${var.environment}"
-  user_pool_id = aws_cognito_user_pool.publisher_pool.id
-
-  generate_secret = false
+resource "aws_cognito_user_pool_client" "client" {
+  name         = "${var.project_name}-app-client-${var.environment}"
+  user_pool_id = aws_cognito_user_pool.main.id
 
   explicit_auth_flows = [
-    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_USER_SRP_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH"
+    "ALLOW_USER_PASSWORD_AUTH"
   ]
-
-  supported_identity_providers = ["COGNITO"]
 }
 
-# Publisher Group
-resource "aws_cognito_user_group" "publisher_group" {
-  name         = "publishers"
-  user_pool_id = aws_cognito_user_pool.publisher_pool.id
-  description  = "Publisher users"
+resource "aws_cognito_user_group" "publisher" {
+  name         = "Publisher"
+  description  = "Publisher group with access to publishing features"
+  user_pool_id = aws_cognito_user_pool.main.id
   precedence   = 1
+}
+
+# ---------------------------------------------
+# API Gateway V2 (HTTP API) Configuration
+# ---------------------------------------------
+
+resource "aws_apigatewayv2_api" "main" {
+  name          = "${var.project_name}-api-${var.environment}"
+  protocol_type = "HTTP"
+  
+  cors_configuration {
+    allow_origins = ["*"]  # In production, restrict this to your frontend domain
+    allow_methods = ["GET", "POST", "PUT", "DELETE"]
+    allow_headers = ["Content-Type", "Authorization"]
+    max_age      = 300
+  }
+  
+  tags = local.tags
+}
+
+resource "aws_apigatewayv2_authorizer" "cognito" {
+  api_id           = aws_apigatewayv2_api.main.id
+  authorizer_type  = "JWT"
+  identity_sources = ["$request.header.Authorization"]
+  name            = "cognito-authorizer"
+
+  jwt_configuration {
+    audience = [aws_cognito_user_pool_client.client.id]
+    issuer   = "https://cognito-idp.${var.region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+  }
+}
+
+resource "aws_apigatewayv2_integration" "publisher" {
+  api_id           = aws_apigatewayv2_api.main.id
+  integration_type = "AWS_PROXY"
+  
+  integration_method = "POST"
+  integration_uri    = aws_lambda_function.publisher.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "publisher" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /publish"
+  target    = "integrations/${aws_apigatewayv2_integration.publisher.id}"
+
+  authorization_type = "JWT"
+  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_lambda_permission" "publisher_apigw" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.publisher.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.main.id
+  name        = "default"
+  auto_deploy = true
+}
+
+# ---------------------------------------------
+# Publisher Lambda Function
+# ---------------------------------------------
+resource "aws_lambda_function" "publisher" {
+  filename         = "${path.module}/lambda/publisher/publisher.zip"
+  function_name    = "${var.project_name}-publisher-${var.environment}"
+  role            = aws_iam_role.lambda_app_exec.arn
+  handler         = "publisher"
+  runtime         = "provided.al2"
+  architectures   = ["x86_64"]
+
+  environment {
+    variables = {
+      COGNITO_USER_POOL_ID = aws_cognito_user_pool.main.id
+      COGNITO_CLIENT_ID    = aws_cognito_user_pool_client.client.id
+    }
+  }
+
+  tags = local.tags
+}
+
+# ---------------------------------------------
+# Outputs
+# ---------------------------------------------
+output "api_endpoint" {
+  value = aws_apigatewayv2_api.main.api_endpoint
+}
+
+output "cognito_pool_id" {
+  value = aws_cognito_user_pool.main.id
+}
+
+output "cognito_client_id" {
+  value = aws_cognito_user_pool_client.client.id
+}
+
+output "cognito_endpoint" {
+  value = aws_cognito_user_pool.main.endpoint
 }
 
