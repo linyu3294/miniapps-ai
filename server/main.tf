@@ -42,6 +42,14 @@ resource "aws_iam_role_policy_attachment" "lambda_app_policy" {
 resource "aws_s3_bucket" "apps" {
   bucket = "${var.project_name}-apps-${var.environment}"
   tags   = local.tags
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      bucket,
+      tags,
+    ]
+  }
 }
 
 # ---------------------------------------------
