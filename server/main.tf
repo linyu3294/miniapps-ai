@@ -171,13 +171,6 @@ resource "aws_lambda_function" "publisher" {
   runtime         = "provided.al2"
   architectures   = ["x86_64"]
 
-  environment {
-    variables = {
-      COGNITO_USER_POOL_ID = aws_cognito_user_pool.main.id
-      COGNITO_CLIENT_ID    = aws_cognito_user_pool_client.client.id
-    }
-  }
-
   tags = local.tags
 }
 
