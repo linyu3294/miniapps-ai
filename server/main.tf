@@ -180,6 +180,12 @@ resource "aws_lambda_function" "publisher" {
   runtime         = "provided.al2"
   architectures   = ["x86_64"]
 
+  environment {
+    variables = {
+      apps_bucket = aws_s3_bucket.apps.bucket
+    }
+  }
+
   tags = local.tags
 }
 

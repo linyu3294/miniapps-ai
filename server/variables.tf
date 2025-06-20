@@ -27,17 +27,6 @@ variable "api_stage_name" {
 #   type        = string
 # }
 
-# variable "s3_bucket" {
-#   description = "S3 bucket for app files"
-#   type        = string
-# }
-
-# variable "api_key_value" {
-#   description = "API key value for API Gateway"
-#   type        = string
-#   sensitive   = true
-# }
-
 # variable "allowed_origins" {
 #   description = "List of allowed origins for CORS"
 #   type        = list(string)
