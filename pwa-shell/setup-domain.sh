@@ -48,7 +48,7 @@ case $choice in
         done
         
         # Update terraform.tfvars
-        cat > ../server/terraform.tfvars << EOF
+        cat > ../terraform.tfvars << EOF
 region             = "us-east-1"
 project_name       = "miniapps-ai"
 environment        = "prod"
@@ -82,7 +82,7 @@ EOF
         done
         
         # Update terraform.tfvars
-        cat > ../server/terraform.tfvars << EOF
+        cat > ../terraform.tfvars << EOF
 region             = "us-east-1"
 project_name       = "miniapps-ai"
 environment        = "prod"

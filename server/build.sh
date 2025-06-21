@@ -24,6 +24,9 @@ if [ $? -ne 0 ]; then
 fi
 echo "\n\n\n---------------------------------------------------------------------------------\n\n\n"
 echo "All tests passed. Deploying to AWS..."
+cd ../
 terraform apply
+
+cd server
 
 echo "Build complete! Lambda functions are ready for deployment."

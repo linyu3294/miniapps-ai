@@ -28,9 +28,13 @@ The platform consists of three main components:
 ## 📁 Project Structure
 ```
 miniapps-ai/
-├── server/           # AWS infrastructure and Lambda functions
+├── server/           # AWS Lambda functions & build scripts
 ├── pwa-shell/        # Dynamic PWA shell app
-└── platform/         # Main platform web app (TODO)
+├── platform/         # Main platform web app (TODO)
+├── main.tf           # Main Terraform configuration
+├── variables.tf      # Terraform variables
+├── outputs.tf        # Terraform outputs
+└── ...
 ```
 
 ## 📝 Documentation

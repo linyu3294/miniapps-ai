@@ -1,5 +1,5 @@
 variable "region" {
-  description = "AWS region to deploy resources"
+  description = "AWS region"
   type        = string
   default     = "us-east-1"
 }
@@ -28,8 +28,9 @@ variable "client_domain" {
 }
 
 variable "allowed_origins" {
-description = "List of allowed origins for CORS"
-type        = list(string)
+  description = "List of allowed origins for CORS"
+  type        = list(string)
+  default     = []
 }
 
 variable "route53_zone_id" {
@@ -37,7 +38,12 @@ variable "route53_zone_id" {
   type        = string
 }
 
+variable "root_domain" {
+  description = "The root domain name (e.g., miniprograms.app)"
+  type        = string
+}
+
 variable "apps_domain" {
-  description = "The domain name for the PWA shell app (e.g., app.example.com)."
+  description = "The domain for the PWA shell (e.g., app.miniprograms.app)"
   type        = string
 }

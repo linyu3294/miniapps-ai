@@ -7,7 +7,8 @@ environment        = "prod"
 allowed_origins = [
   "http://localhost:0000"
 ]
-
-route53_zone_id = "Z1234567890ABCDEF"   # Replace with your actual Hosted Zone ID
-apps_domain     = "app.example.com"     # Replace with your actual subdomain
+route53_zone_id = "Z1234567890ABCDEF"
+apps_domain     = "app.example.com"
 client_domain = "https://app.netlify.com"
+root_domain     = "your-app-domain.app"
+apps_domain     = "app.your-app-domain.app"

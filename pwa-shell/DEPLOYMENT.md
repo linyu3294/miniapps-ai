@@ -61,7 +61,7 @@ PWA Shell (app.yourdomain.com)
 
 ## 🔧 Configuration
 
-The `../server/terraform.tfvars` file contains:
+The `../terraform.tfvars` file contains:
 ```hcl
 region             = "us-east-1"
 project_name       = "miniapps-ai"
@@ -78,6 +78,6 @@ apps_domain        = "app.yourdomain.com"  # Your subdomain
 
 ## 📞 Support
 
-- Check Terraform outputs: `cd ../server && terraform output`
+- Check Terraform outputs: `cd .. && terraform output`
 - Check S3 contents: `aws s3 ls s3://miniapps-ai-apps-prod/`
 - Check CloudFront: `aws cloudfront list-distributions` 
