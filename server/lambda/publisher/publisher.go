@@ -275,7 +275,7 @@ func createPresignedUrl(ctx context.Context, appSlug string, versionId string) (
 	}
 
 	return createSuccessResponse(200, map[string]interface{}{
-			"message":       "Content published successfully",
+			"message":       "Presigned URL generated successfully",
 			"presigned_url": presignedURL.URL,
 		}),
 		presignedURL.URL,
