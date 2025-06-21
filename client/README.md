@@ -33,7 +33,7 @@ cp env.example .env.local
 
 Update `.env.local` with your actual Cognito configuration:
 ```env
-VITE_AWS_REGION=us-east-1
+VITE_API_GATEWAY_HTTPS_URL=https://abcdefg.execute-api.us-east-1.amazonaws.com/default/
 VITE_USER_POOL_ID=us-east-1_xxxxxxxxx
 VITE_USER_POOL_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
@@ -93,7 +93,7 @@ The app will be available at `http://localhost:5173`
 
 4. **Set Environment Variables**:
    ```bash
-   netlify env:set VITE_AWS_REGION us-east-1
+   netlify env:set VITE_API_GATEWAY_HTTPS_URL your-aws-gateway-url
    netlify env:set VITE_USER_POOL_ID your-user-pool-id
    netlify env:set VITE_USER_POOL_CLIENT_ID your-client-id
    ```
