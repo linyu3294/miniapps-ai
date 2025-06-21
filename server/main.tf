@@ -159,7 +159,7 @@ resource "aws_apigatewayv2_integration" "publisher" {
 
 resource "aws_apigatewayv2_route" "publisher" {
   api_id    = aws_apigatewayv2_api.main.id
-  route_key = "POST /publish"
+  route_key = "POST /publish/{appSlug}/version/{versionId}"
   target    = "integrations/${aws_apigatewayv2_integration.publisher.id}"
 
   authorization_type = "JWT"
