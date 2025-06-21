@@ -52,6 +52,18 @@ resource "aws_s3_bucket" "apps" {
   }
 }
 
+resource "aws_s3_bucket_cors_configuration" "apps" {
+  bucket = aws_s3_bucket.apps.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT"]
+    allowed_origins = ["http://localhost:5173", var.client_domain]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3000
+  }
+}
+
 # ---------------------------------------------
 # Cognito User Pool for Authentication
 # ---------------------------------------------
@@ -117,8 +129,9 @@ resource "aws_apigatewayv2_api" "main" {
   cors_configuration {
     allow_origins = ["*"]  # In production, restrict this to your frontend domain
     allow_methods = ["GET", "POST", "PUT", "DELETE"]
+    allow_origins = concat([var.client_domain], var.allowed_origins)
     allow_headers = ["Content-Type", "Authorization"]
-    max_age      = 300
+    max_age       = 300
   }
   
   tags = local.tags

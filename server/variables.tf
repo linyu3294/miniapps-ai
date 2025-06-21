@@ -22,15 +22,15 @@ variable "api_stage_name" {
   default     = "v1"
 }
 
-# variable "client_domain" {
-#   description = "Allowed client domain for CORS"
-#   type        = string
-# }
+variable "client_domain" {
+  description = "Allowed client domain for CORS"
+  type        = string
+}
 
-# variable "allowed_origins" {
-#   description = "List of allowed origins for CORS"
-#   type        = list(string)
-# }
+variable "allowed_origins" {
+description = "List of allowed origins for CORS"
+type        = list(string)
+}
 
 variable "route53_zone_id" {
   description = "The Route 53 Hosted Zone ID for the app domain."
