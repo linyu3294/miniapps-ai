@@ -127,7 +127,6 @@ resource "aws_apigatewayv2_api" "main" {
   protocol_type = "HTTP"
   
   cors_configuration {
-    allow_origins = ["*"]  # In production, restrict this to your frontend domain
     allow_methods = ["GET", "POST", "PUT", "DELETE"]
     allow_origins = concat([var.client_domain], var.allowed_origins)
     allow_headers = ["Content-Type", "Authorization"]
