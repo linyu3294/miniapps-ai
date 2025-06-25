@@ -1,32 +1,51 @@
 #!/bin/bash
+# This script builds all Go Lambda functions in the project.
+# It should be run from the directory where the script is located.
 
-# Build each Lambda function
+set -e
+
 echo "Building Lambda functions..."
 
-cd ./lambda
+# Define the source directory for the lambda functions
+LAMBDA_SRC_DIR="./lambda"
 
-
-# Build publisher function
-echo "Building publisher function..."
-cd ./publisher
-echo "Creating zip file for publisher.go function..."
-GOOS=linux GOARCH=amd64 go build -o bootstrap publisher.go
-zip ./publisher.zip bootstrap
-
-
-cd ../../
-
-echo "\n\n\n----------------------------------Running tests----------------------------------\n\n\n"
-go test ./...
-if [ $? -ne 0 ]; then
-    echo "Tests failed. Aborting deployment."
-    exit 1
+# Check if the lambda source directory exists
+if [ ! -d "$LAMBDA_SRC_DIR" ]; then
+  echo "Error: Lambda source directory not found at $LAMBDA_SRC_DIR"
+  exit 1
 fi
-echo "\n\n\n---------------------------------------------------------------------------------\n\n\n"
-echo "All tests passed. Deploying to AWS..."
-cd ../
-terraform apply
 
-cd server
+# Iterate over each function directory in the lambda source directory
+for func_dir in "$LAMBDA_SRC_DIR"/*; do
+  if [ -d "$func_dir" ]; then
+    func_name=$(basename "$func_dir")
+    echo "--- Building: $func_name ---"
 
-echo "Build complete! Lambda functions are ready for deployment."
+    # Navigate into the function's directory
+    cd "$func_dir"
+
+    # Initialize Go module if it doesn't exist
+    if [ ! -f "go.mod" ]; then
+      echo "Initializing Go module for $func_name..."
+      # Use the function name for the module path
+      go mod init "miniapps-lambda-$func_name"
+      go mod tidy
+    fi
+
+    # Build the Lambda function for Linux AMD64 architecture
+    GOOS=linux GOARCH=amd64 go build -o bootstrap -tags lambda.norpc .
+
+    # Create the zip archive, overwriting if it exists
+    zip -j "${func_name}.zip" bootstrap
+
+    # Clean up the bootstrap executable
+    rm bootstrap
+
+    echo "--- Done: $func_name ---"
+    
+    # Navigate back to the original directory (lambda folder)
+    cd - > /dev/null
+  fi
+done
+
+echo "Build complete! All Lambda functions are ready for deployment."

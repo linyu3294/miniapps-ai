@@ -1,11 +1,15 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +19,125 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go/aws"
 )
+
+/*****************************************************/
+// Unzip and Upload function
+/*****************************************************/
+
+func unzipAndUpload(ctx context.Context, s3Event events.S3Event) error {
+	// Initialize S3 client
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+	s3Client := s3.NewFromConfig(cfg)
+	appsBucket := os.Getenv("apps_bucket")
+
+	for _, record := range s3Event.Records {
+		sourceBucket := record.S3.Bucket.Name
+		sourceKey := record.S3.Object.Key
+
+		log.Printf("Processing file from bucket %s, key %s", sourceBucket, sourceKey)
+
+		// Expected sourceKey format: uploads/{appSlug}/{versionId}/{some_uuid}.zip
+		parts := strings.Split(sourceKey, "/")
+		if len(parts) != 4 || parts[0] != "uploads" {
+			log.Printf("Invalid key format, skipping: %s", sourceKey)
+			continue
+		}
+		appSlug := parts[1]
+		versionId := parts[2]
+
+		// Download the zip file
+		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(sourceBucket),
+			Key:    aws.String(sourceKey),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to get object %s from bucket %s: %w", sourceKey, sourceBucket, err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read object body: %w", err)
+		}
+
+		// Unzip
+		zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+		if err != nil {
+			return fmt.Errorf("failed to create zip reader: %w", err)
+		}
+
+		// Upload unzipped files
+		for _, file := range zipReader.File {
+			if file.FileInfo().IsDir() {
+				continue
+			}
+
+			rc, err := file.Open()
+			if err != nil {
+				return fmt.Errorf("failed to open file in zip: %w", err)
+			}
+			defer rc.Close()
+
+			fileBody, err := io.ReadAll(rc)
+			if err != nil {
+				return fmt.Errorf("failed to read file content from zip: %w", err)
+			}
+
+			destKey := filepath.Join("apps", appSlug, versionId, file.Name)
+			contentType := getMimeType(file.Name)
+
+			_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket:      aws.String(appsBucket),
+				Key:         aws.String(destKey),
+				Body:        bytes.NewReader(fileBody),
+				ContentType: aws.String(contentType),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to upload unzipped file %s: %w", destKey, err)
+			}
+			log.Printf("Successfully uploaded %s", destKey)
+		}
+
+		// Delete the original zip file
+		_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(sourceBucket),
+			Key:    aws.String(sourceKey),
+		})
+		if err != nil {
+			log.Printf("Failed to delete original zip file %s: %v", sourceKey, err)
+		} else {
+			log.Printf("Successfully deleted original zip file %s", sourceKey)
+		}
+	}
+	return nil
+}
+
+func getMimeType(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".html":
+		return "text/html"
+	case ".css":
+		return "text/css"
+	case ".js":
+		return "application/javascript"
+	case ".json":
+		return "application/json"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".svg":
+		return "image/svg+xml"
+	case ".onnx":
+		return "application/octet-stream"
+	default:
+		return "application/octet-stream"
+	}
+}
 
 /*****************************************************/
 // Publish Request types
@@ -77,16 +200,12 @@ type ErrorResponse struct {
 /*****************************************************/
 
 func validatePublisher(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	// Extract claims from the JWT token
 	claims := request.RequestContext.Authorizer.JWT.Claims
 	groupsClaim, ok := claims["cognito:groups"]
 	if !ok {
 		return createErrorResponse(403, "Access denied. No group information found.")
 	}
 
-	// The 'cognito:groups' claim from API Gateway comes as a string representation
-	// of a slice, e.g., "[Publisher, Admin]". It is not valid JSON.
-	// We need to parse this string manually.
 	if !strings.HasPrefix(groupsClaim, "[") || !strings.HasSuffix(groupsClaim, "]") {
 		log.Println("Group claim is not in the expected format '[...]'")
 		return createErrorResponse(403, "Invalid group format in token.")
@@ -148,7 +267,6 @@ func validatePublishRequest(request PublishRequest) (events.APIGatewayV2HTTPResp
 }
 
 func validateModelOnnxFile(files []File) (events.APIGatewayV2HTTPResponse, error) {
-	// Determine that the model.onnx file is present and it's less than 25MB
 	modelOnnxFile := File{}
 	for _, file := range files {
 		if file.Filename == "model.onnx" {
@@ -159,7 +277,6 @@ func validateModelOnnxFile(files []File) (events.APIGatewayV2HTTPResponse, error
 		return createErrorResponse(400, "The model.onnx file is required")
 	}
 
-	// Determine that the model.onnx file is less than 25MB
 	if modelOnnxFile.Size > 25*1024*1024 {
 		return createErrorResponse(400, "The model.onnx file size exceeds 25MB")
 	}
@@ -168,7 +285,6 @@ func validateModelOnnxFile(files []File) (events.APIGatewayV2HTTPResponse, error
 }
 
 func validateFileSize(files []File) (events.APIGatewayV2HTTPResponse, error) {
-	// Add up all the file sizes
 	totalSize := 0
 	for _, file := range files {
 		totalSize += file.Size
@@ -182,7 +298,6 @@ func validateFileSize(files []File) (events.APIGatewayV2HTTPResponse, error) {
 }
 
 func validateAppFiles(files []File) (events.APIGatewayV2HTTPResponse, error) {
-	// Validate that there is at least one .js file or .wasm file and at least one html file
 	jsFiles := 0
 	wasmFiles := 0
 	htmlFiles := 0
@@ -232,7 +347,6 @@ func createSuccessResponse(statusCode int, data interface{}) events.APIGatewayV2
 }
 
 func validateAppEntrypoint(entrypoint string, files []File) (events.APIGatewayV2HTTPResponse, error) {
-	// Determine that the entrypoint is a valid file and it points to a valid file
 	for _, file := range files {
 		if file.Filename == entrypoint {
 			return events.APIGatewayV2HTTPResponse{}, nil
@@ -245,107 +359,80 @@ func validateAppEntrypoint(entrypoint string, files []File) (events.APIGatewayV2
 // Handler functions
 /*****************************************************/
 
-func createPresignedUrl(ctx context.Context, appSlug string, versionId string) (
-	events.APIGatewayV2HTTPResponse,
-	string,
-	error,
-) {
-	s3Directory := fmt.Sprintf("%s/%s/%s/%s", "apps", appSlug, versionId, appSlug)
-
+func createPresignedUrl(ctx context.Context, appSlug string, versionId string) (string, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		resp, err := createErrorResponse(500, "Failed to load AWS config")
-		return resp, "", err
+		return "", fmt.Errorf("error loading AWS configuration: %w", err)
 	}
-
 	s3Client := s3.NewFromConfig(cfg)
-	presignClient := s3.NewPresignClient(s3Client)
-	bucket := os.Getenv("apps_bucket")
+	presigner := s3.NewPresignClient(s3Client)
+	appsBucket := os.Getenv("apps_bucket")
+	uploadKey := fmt.Sprintf("uploads/%s/%s/%d.zip", appSlug, versionId, time.Now().UnixNano())
 
-	presignedURL, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(s3Directory),
-	},
-		// Set to 1 minute for getting presigned URL to upload to S3
-		// The presigned URL is used to upload the file to S3 immediately
-		s3.WithPresignExpires(1*time.Minute))
+	req, err := presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(appsBucket),
+		Key:    aws.String(uploadKey),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = time.Duration(15 * time.Minute)
+	})
+
 	if err != nil {
-		resp, err := createErrorResponse(500, "Failed to generate presigned PUT URL")
-		return resp, "", err
+		return "", fmt.Errorf("error creating presigned URL: %w", err)
 	}
 
-	return createSuccessResponse(200, map[string]interface{}{
-			"message":       "Presigned URL generated successfully",
-			"presigned_url": presignedURL.URL,
-		}),
-		presignedURL.URL,
-		nil
+	return req.URL, nil
 }
 
 func handlePostRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	if _, err := validatePublisher(request); err != nil {
+		return createErrorResponse(403, "Access denied. Publisher role required.")
+	}
+
+	var publishReq PublishRequest
+	if err := json.Unmarshal([]byte(request.Body), &publishReq); err != nil {
+		return createErrorResponse(400, "Invalid request body")
+	}
+
 	appSlug := request.PathParameters["app-slug"]
 	versionId := request.PathParameters["version-id"]
 
 	if appSlug == "" || versionId == "" {
-		return createErrorResponse(400, "Invalid request path parameters")
+		log.Printf("Could not find app-slug or version-id in path parameters: %+v", request.PathParameters)
+		return createErrorResponse(400, "app-slug and version-id are required in the URL path")
 	}
 
-	var publishReq PublishRequest
-	if err := json.Unmarshal([]byte(request.Body), &publishReq); err != nil {
-		return createErrorResponse(400, "Invalid request body")
-	}
-
+	// Run all validations
 	if _, err := validatePublishRequest(publishReq); err != nil {
 		return createErrorResponse(400, err.Error())
 	}
-
 	if _, err := validateModelOnnxFile(publishReq.Files); err != nil {
 		return createErrorResponse(400, err.Error())
 	}
-
 	if _, err := validateFileSize(publishReq.Files); err != nil {
 		return createErrorResponse(400, err.Error())
 	}
-
 	if _, err := validateAppFiles(publishReq.Files); err != nil {
 		return createErrorResponse(400, err.Error())
 	}
-
 	if _, err := validateAppEntrypoint(publishReq.Entrypoint, publishReq.Files); err != nil {
 		return createErrorResponse(400, err.Error())
 	}
 
-	_, presignedUrl, err := createPresignedUrl(ctx, appSlug, versionId)
+	presignedURL, err := createPresignedUrl(ctx, appSlug, versionId)
 	if err != nil {
-		return createErrorResponse(500, err.Error())
+		log.Printf("Error creating presigned URL: %v", err)
+		return createErrorResponse(500, "Failed to generate presigned URL")
 	}
 
 	return createSuccessResponse(200, map[string]interface{}{
-		"message":       "Content published successfully",
-		"presigned_url": presignedUrl,
+		"message":       "Presigned URL generated successfully",
+		"presigned_url": presignedURL,
 	}), nil
 }
 
 func handleRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	_, err := validatePublisher(request)
-	if err != nil {
-		return createErrorResponse(403, err.Error())
-	}
-
-	var publishReq PublishRequest
-	if err := json.Unmarshal([]byte(request.Body), &publishReq); err != nil {
-		return createErrorResponse(400, "Invalid request body")
-	}
-	switch strings.ToUpper(request.RequestContext.HTTP.Method) {
-	case "POST":
-		return handlePostRequest(ctx, request)
-	default:
-		return events.APIGatewayV2HTTPResponse{
-			StatusCode: 405,
-			Headers:    map[string]string{contentTypeHeader: jsonContentType},
-			Body:       "Method not allowed",
-		}, nil
-	}
+	log.Println("API Gateway event detected, processing as a publish request...")
+	return handlePostRequest(ctx, request)
 }
 
 func main() {

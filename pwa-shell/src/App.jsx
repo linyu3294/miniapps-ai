@@ -9,7 +9,7 @@ function App() {
     const match = window.location.pathname.match(/^\/app\/([^/]+)\/?/);
     if (match) {
       setSlug(match[1]);
-      // Fetch manifest.json from S3 via CloudFront
+      // Fetch manifest.json from the /app/* path, which is routed by CloudFront
       fetch(`/app/${match[1]}/manifest.json`)
         .then(res => res.json())
         .then(setManifest);

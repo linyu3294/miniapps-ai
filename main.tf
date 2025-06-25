@@ -72,10 +72,15 @@ resource "aws_s3_bucket_policy" "apps" {
       {
         Effect    = "Allow",
         Principal = {
-          AWS = aws_cloudfront_origin_access_identity.oai.iam_arn
+          Service = "cloudfront.amazonaws.com"
         },
         Action    = "s3:GetObject",
-        Resource  = "${aws_s3_bucket.apps.arn}/*"
+        Resource  = "${aws_s3_bucket.apps.arn}/*",
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.main_distribution.arn
+          }
+        }
       }
     ]
   })
@@ -259,51 +264,113 @@ resource "aws_iam_role_policy" "publisher_s3_policy" {
 }
 
 # ---------------------------------------------
-# CloudFront for PWA Shell
+# PWA Shell App & Modern Access Control
 # ---------------------------------------------
-
-resource "aws_cloudfront_origin_access_identity" "oai" {
-  comment = "OAI for ${var.project_name} S3 bucket"
+locals {
+  pwa_shell_bucket_name = "${var.project_name}-pwa-shell-${var.environment}"
 }
 
-resource "aws_cloudfront_distribution" "s3_distribution" {
-  origin {
-    domain_name = aws_s3_bucket.apps.bucket_regional_domain_name
-    origin_id   = "S3-${var.project_name}"
+resource "aws_s3_bucket" "pwa_shell_bucket" {
+  bucket = local.pwa_shell_bucket_name
+}
 
-    s3_origin_config {
-      origin_access_identity = aws_cloudfront_origin_access_identity.oai.cloudfront_access_identity_path
+resource "aws_cloudfront_origin_access_control" "main_oac" {
+  name                              = "${var.project_name}-oac-${var.environment}"
+  description                       = "Main OAC for the MiniApps Platform"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_s3_bucket_policy" "pwa_shell_bucket_policy" {
+  bucket = aws_s3_bucket.pwa_shell_bucket.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontServicePrincipal"
+        Effect    = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action    = "s3:GetObject",
+        Resource  = "${aws_s3_bucket.pwa_shell_bucket.arn}/*",
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.main_distribution.arn
+          }
+        }
+      }
+    ]
+  })
+}
+
+# ---------------------------------------------
+# Universal CloudFront Function
+# ---------------------------------------------
+resource "aws_cloudfront_function" "path_rewrite_function" {
+  name    = "${var.project_name}-path-rewrite"
+  runtime = "cloudfront-js-1.0"
+  comment = "Rewrites directory-like URLs to index.html"
+  publish = true
+  code    = file("${path.module}/cloudfront_function/index.js")
+}
+
+# ---------------------------------------------
+# Main Multi-Origin CloudFront Distribution
+# ---------------------------------------------
+resource "aws_cloudfront_distribution" "main_distribution" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  comment             = "Main Distribution for MiniApps AI Platform"
+  default_root_object = "index.html"
+  
+  aliases = [var.apps_domain]
+
+  # Origin 1: PWA Shell Bucket (Default)
+  origin {
+    domain_name              = aws_s3_bucket.pwa_shell_bucket.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.main_oac.id
+    origin_id                = local.pwa_shell_bucket_name
+  }
+
+  # Origin 2: Mini-Apps Bucket
+  origin {
+    domain_name              = aws_s3_bucket.apps.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.main_oac.id
+    origin_id                = aws_s3_bucket.apps.id
+  }
+
+  # Default Behavior: Serves the PWA Shell from its bucket
+  default_cache_behavior {
+    target_origin_id = local.pwa_shell_bucket_name
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    
+    viewer_protocol_policy = "redirect-to-https"
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.path_rewrite_function.arn
     }
   }
 
-  enabled             = true
-  is_ipv6_enabled     = true
-  default_root_object = "index.html"
-  comment             = "S3 distribution for ${var.project_name}"
-
-  # Aliases must be set to use a custom domain
-  aliases = [var.apps_domain]
-
-  default_cache_behavior {
-    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+  # Path-Based Behavior: Serves mini-apps from the 'apps' bucket
+  ordered_cache_behavior {
+    path_pattern     = "/app/*"
+    target_origin_id = aws_s3_bucket.apps.id
+    
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
-    target_origin_id = "S3-${var.project_name}"
-
-    # Use modern cache policy instead of deprecated forwarded_values
-    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # Managed-CachingOptimized
-
     viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 86400
-  }
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
 
-  # For Single Page Apps (SPA)
-  custom_error_response {
-    error_caching_min_ttl = 300
-    error_code            = 404
-    response_code         = 200
-    response_page_path    = "/index.html"
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.path_rewrite_function.arn
+    }
   }
 
   restrictions {
@@ -313,7 +380,6 @@ resource "aws_cloudfront_distribution" "s3_distribution" {
   }
 
   viewer_certificate {
-    # This requires a certificate in us-east-1
     acm_certificate_arn = aws_acm_certificate_validation.cert.certificate_arn
     ssl_support_method  = "sni-only"
   }
@@ -335,8 +401,8 @@ resource "aws_route53_record" "app" {
   type    = "A"
 
   alias {
-    name                   = aws_cloudfront_distribution.s3_distribution.domain_name
-    zone_id                = aws_cloudfront_distribution.s3_distribution.hosted_zone_id
+    name                   = aws_cloudfront_distribution.main_distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.main_distribution.hosted_zone_id
     evaluate_target_health = false
   }
 }
@@ -378,19 +444,80 @@ resource "aws_s3_bucket_notification" "apps_upload_notification" {
   bucket = aws_s3_bucket.apps.id
 
   lambda_function {
-    lambda_function_arn = aws_lambda_function.publisher.arn
+    lambda_function_arn = aws_lambda_function.unzip.arn
     events              = ["s3:ObjectCreated:*"]
     filter_prefix       = "uploads/"
+    filter_suffix       = ".zip"
   }
 
-  depends_on = [aws_lambda_permission.s3_invoke]
+  depends_on = [aws_lambda_permission.s3_invoke_unzip]
 }
 
-resource "aws_lambda_permission" "s3_invoke" {
+resource "aws_lambda_permission" "s3_invoke_unzip" {
   statement_id  = "AllowExecutionFromS3Bucket"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.publisher.function_name
+  function_name = aws_lambda_function.unzip.function_name
   principal     = "s3.amazonaws.com"
   source_arn    = aws_s3_bucket.apps.arn
-  source_account = data.aws_caller_identity.current.account_id
+}
+
+# ---------------------------------------------
+# Unzip Lambda for Published Apps
+# ---------------------------------------------
+resource "aws_lambda_function" "unzip" {
+  filename         = "server/lambda/unzip/unzip.zip"
+  source_code_hash = filebase64sha256("server/lambda/unzip/unzip.zip")
+  function_name    = "${var.project_name}-unzip-${var.environment}"
+  role             = aws_iam_role.unzip_exec.arn
+  handler          = "unzip"
+  runtime          = "provided.al2"
+  architectures    = ["x86_64"]
+  timeout          = 30
+
+  environment {
+    variables = {
+      apps_bucket = aws_s3_bucket.apps.bucket
+    }
+  }
+
+  tags = local.tags
+}
+
+resource "aws_iam_role" "unzip_exec" {
+  name = "${var.project_name}-${var.environment}-lambda-unzip-exec-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole",
+      Effect    = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "unzip_basic_policy" {
+  role       = aws_iam_role.unzip_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "unzip_s3_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-unzip-s3-policy"
+  role = aws_iam_role.unzip_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ],
+        Resource = "${aws_s3_bucket.apps.arn}/*"
+      },
+    ]
+  })
 }
