@@ -1,6 +1,6 @@
 {
-  "name": "My Example Mini App",
-  "short_name": "ExampleApp",
+  "name": "My Example Mini App - Shape",
+  "short_name": "ExampleAppShape",
   "start_url": "index.html",
   "display": "standalone",
   "icons": [
