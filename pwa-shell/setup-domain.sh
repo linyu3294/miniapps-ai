@@ -53,7 +53,7 @@ region             = "us-east-1"
 project_name       = "miniapps-ai"
 environment        = "prod"
 route53_zone_id    = "$HOSTED_ZONE_ID"
-apps_domain        = "app.$domain_name"
+root_domain        = "$domain_name"
 EOF
         
         echo
@@ -87,7 +87,7 @@ region             = "us-east-1"
 project_name       = "miniapps-ai"
 environment        = "prod"
 route53_zone_id    = "$zone_id"
-apps_domain        = "app.$ZONE_NAME"
+root_domain        = "$ZONE_NAME"
 EOF
         
         echo
@@ -111,4 +111,5 @@ echo "1. Update your domain registrar's nameservers"
 echo "2. Wait 24-48 hours for DNS propagation"
 echo "3. Run './deploy.sh' to deploy PWA Shell"
 echo
-echo "🔗 Your PWA Shell will be available at: https://app.$domain_name" 
+
+echo "🔗 Your PWA Shell will be available at: https://{slug}.$domain_name (replace {slug} with your app's slug)" 

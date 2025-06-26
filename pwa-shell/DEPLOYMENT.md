@@ -1,7 +1,7 @@
 # PWA Shell Deployment Guide
 
 ## 🎯 Goal
-Deploy the PWA Shell to AWS with a custom domain.
+Deploy the PWA Shell to AWS with a custom domain and wildcard subdomains for each app.
 
 ## 📋 Prerequisites
 - AWS CLI configured
@@ -29,12 +29,12 @@ chmod +x deploy.sh
 - Confirm the Terraform plan when prompted
 
 ### Step 3: Test
-Visit: `https://app.yourdomain.com`
+Visit: `https://shape.yourdomain.com` (replace 'shape' with your app slug)
 
 ## 🏗️ Architecture
 
 ```
-PWA Shell (app.yourdomain.com)
+PWA Shell ({slug}.yourdomain.com)
 ├── index.html          ← PWA Shell (deployed by you)
 ├── assets/             ← PWA Shell assets (deployed by you)
 └── apps/shape/         ← Shape app (uploaded by publisher via Platform)
@@ -45,9 +45,9 @@ PWA Shell (app.yourdomain.com)
 
 ## 🔄 How It Works
 
-1. **User visits**: `https://app.yourdomain.com/app/shape/`
+1. **User visits**: `https://shape.yourdomain.com`
 2. **CloudFront serves**: `index.html` (PWA Shell) from S3
-3. **PWA Shell loads**: React app extracts `/app/shape/` from URL
+3. **PWA Shell loads**: React app extracts the slug from the subdomain
 4. **PWA Shell fetches**: App assets from `/apps/shape/` in S3
 5. **App runs**: Within PWA Shell environment
 
@@ -67,7 +67,7 @@ region             = "us-east-1"
 project_name       = "miniapps-ai"
 environment        = "prod"
 route53_zone_id    = "Z1234567890ABCDEF"  # Your hosted zone ID
-apps_domain        = "app.yourdomain.com"  # Your subdomain
+root_domain        = "yourdomain.com"     # Your root domain
 ```
 
 ## 🐛 Troubleshooting

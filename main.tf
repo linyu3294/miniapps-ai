@@ -325,7 +325,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
   comment             = "Main Distribution for MiniApps AI Platform"
   default_root_object = "index.html"
   
-  aliases = [var.apps_domain]
+  aliases = ["*.${var.root_domain}"]
 
   # Origin 1: PWA Shell Bucket (Default)
   origin {
@@ -427,7 +427,7 @@ data "aws_route53_zone" "main" {
 
 resource "aws_route53_record" "app" {
   zone_id = data.aws_route53_zone.main.zone_id
-  name    = var.apps_domain
+  name    = "*.${var.root_domain}"
   type    = "A"
 
   alias {
@@ -438,7 +438,7 @@ resource "aws_route53_record" "app" {
 }
 
 resource "aws_acm_certificate" "cert" {
-  domain_name       = var.apps_domain
+  domain_name       = "*.${var.root_domain}"
   validation_method = "DNS"
 
   lifecycle {

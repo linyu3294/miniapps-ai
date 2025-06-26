@@ -14,9 +14,10 @@ The infrastructure is defined in `main.tf` and includes:
 
 ### 📝 Variables
 Required variables in `terraform.tfvars`:
-- Copy the 
 - `route53_zone_id`: Your Route 53 hosted zone ID
-- `apps_domain`: Domain for the PWA shell app (e.g., app.example.com)
+- `root_domain`: Your root domain (e.g., miniprograms.app)
+
+> **Note:** The platform uses wildcard subdomains for each app: `{slug}.miniprograms.app` (e.g., `shape.miniprograms.app`).
 
 ### 🚀 Deployment
 ```bash

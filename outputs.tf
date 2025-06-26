@@ -18,11 +18,6 @@ output "cloudfront_domain_name" {
   value       = aws_cloudfront_distribution.main_distribution.domain_name
 }
 
-output "app_domain_url" {
-  description = "Primary public URL for the application"
-  value       = "https://${var.apps_domain}"
-}
-
 output "api_gateway_url" {
   description = "URL of the API Gateway endpoint"
   value       = aws_apigatewayv2_stage.default.invoke_url

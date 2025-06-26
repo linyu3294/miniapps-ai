@@ -42,8 +42,3 @@ variable "root_domain" {
   description = "The root domain name (e.g., miniprograms.app)"
   type        = string
 }
-
-variable "apps_domain" {
-  description = "The domain for the PWA shell (e.g., app.miniprograms.app)"
-  type        = string
-}

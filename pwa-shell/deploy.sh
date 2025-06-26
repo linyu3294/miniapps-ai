@@ -73,16 +73,14 @@ aws cloudfront create-invalidation --distribution-id $CLOUDFRONT_ID --paths "/*"
 # Show deployment info
 echo "✅ PWA Shell deployment completed!"
 echo
-APP_URL=$(terraform output -raw app_domain_url)
 CLOUDFRONT_DOMAIN=$(terraform output -raw cloudfront_domain_name)
+ROOT_DOMAIN=$(awk -F' *= *' '/^root_domain/ {print $2}' ../terraform.tfvars | tr -d '"')
 
-echo "🌐 PWA Shell URL: $APP_URL"
+echo "🌐 Example PWA Shell URLs:"
+echo "   - https://shape.$ROOT_DOMAIN"
+echo "   - https://plant.$ROOT_DOMAIN"
 echo "☁️  CloudFront Domain: $CLOUDFRONT_DOMAIN (for debugging)"
 echo "🔗 API URL: $API_URL"
 echo
-echo "📝 Test URLs:"
-echo "   - PWA Shell: $APP_URL"
-echo "   - Shape app: $APP_URL/app/shape/"
-echo "   - Plant app: $APP_URL/app/plant/"
-echo
+
 echo "⚠️  Note: DNS propagation may take 24-48 hours" 
