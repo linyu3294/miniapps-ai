@@ -313,7 +313,7 @@ resource "aws_cloudfront_function" "path_rewrite_function" {
   runtime = "cloudfront-js-1.0"
   comment = "Rewrites directory-like URLs to index.html"
   publish = true
-  code    = file("${path.module}/cloudfront_function/index.js")
+  code    = file("${path.module}/cloudfront-function/rewrite-url.js")
 }
 
 # ---------------------------------------------
@@ -356,21 +356,51 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     }
   }
 
-  # Path-Based Behavior: Serves mini-apps from the 'apps' bucket
+  # Path-Based Behaviors: Serve mini-app assets (with file extensions) from the 'apps' bucket
   ordered_cache_behavior {
-    path_pattern     = "/app/*"
+    path_pattern     = "/app/*.js"
     target_origin_id = aws_s3_bucket.apps.id
-    
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
-
-    function_association {
-      event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.path_rewrite_function.arn
-    }
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+  ordered_cache_behavior {
+    path_pattern     = "/app/*.json"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+  ordered_cache_behavior {
+    path_pattern     = "/app/*.png"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+  ordered_cache_behavior {
+    path_pattern     = "/app/*.ico"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+  ordered_cache_behavior {
+    path_pattern     = "/app/*.onnx"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
   restrictions {

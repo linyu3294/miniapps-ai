@@ -21,6 +21,7 @@ go.work
 .terraform.lock.hcl
 terraform.tfvars
 *.tfvars
+tfplan
 
 MISC
 .DS_Store
