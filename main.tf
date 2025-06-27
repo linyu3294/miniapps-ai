@@ -319,6 +319,19 @@ resource "aws_cloudfront_function" "path_rewrite_function" {
 # ---------------------------------------------
 # Main Multi-Origin CloudFront Distribution
 # ---------------------------------------------
+
+resource "aws_cloudfront_response_headers_policy" "service_worker_allowed" {
+  name = "ServiceWorkerAllowedHeader"
+
+  custom_headers_config {
+    items {
+      header   = "Service-Worker-Allowed"
+      value    = "/"
+      override = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "main_distribution" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -356,6 +369,27 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     }
   }
 
+
+  ordered_cache_behavior {
+    path_pattern     = "/app/*/sw.js"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.service_worker_allowed.id
+  }
+  ordered_cache_behavior {
+    path_pattern     = "/app/*/service-worker.js"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.service_worker_allowed.id
+  }
   # Path-Based Behaviors: Serve mini-app assets (with file extensions) from the 'apps' bucket
   ordered_cache_behavior {
     path_pattern     = "/app/*.js"
@@ -402,7 +436,15 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     compress               = true
     cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
-
+  ordered_cache_behavior {
+    path_pattern     = "/app/*.html"
+    target_origin_id = aws_s3_bucket.apps.id
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
   restrictions {
     geo_restriction {
       restriction_type = "none"

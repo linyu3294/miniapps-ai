@@ -51,11 +51,6 @@ cd "$PROJECT_ROOT/pwa-shell"
 npm install
 VITE_API_URL=$API_URL npm run build
 
-# Ensure service-worker.js is in the root of dist/
-if [ -f "src/service-worker.js" ]; then
-  echo "🛠️  Copying service-worker.js to dist/"
-  cp src/service-worker.js dist/service-worker.js
-fi
 cd ..
 
 # Deploy to S3
