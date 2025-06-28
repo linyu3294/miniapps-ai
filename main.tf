@@ -272,6 +272,14 @@ locals {
 
 resource "aws_s3_bucket" "pwa_shell_bucket" {
   bucket = local.pwa_shell_bucket_name
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      bucket,
+      tags,
+    ]
+  }
 }
 
 resource "aws_cloudfront_origin_access_control" "main_oac" {
