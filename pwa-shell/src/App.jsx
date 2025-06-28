@@ -1,68 +1,88 @@
-// ... existing imports ...
 import React, { useEffect, useState } from "react";
 
 function getSlugFromSubdomain() {
-  // e.g., shape.miniprograms.app → ['shape', 'miniprograms', 'app']
-  const parts = window.location.hostname.split(".");
-  // Assumes: {slug}.miniprograms.app
-  if (parts.length < 3) return null;
-  return parts[0];
+  try {
+    const parts = window.location.hostname.split("."); 
+    if (parts.length < 3) {
+      return null;
+    }
+    const slug = parts[0];
+    return slug;
+  } catch (error) {
+    console.error('Error getting slug from subdomain:', error);
+  }
+}
+
+const loadResource = async (resourceName, url) => {
+  setDebugMsg('Loading resource: ' + `${resourceName}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    console.error(`Failed to load ${resourceName}: ${response.statusText}`);
+    throw new Error(`Failed to load ${resourceName}: ${response.statusText}`);
+  }
+  return response;
 }
 
 const App = () => {
-  const [slug, setSlug] = useState(null);
+  const [slug, setSlugState] = useState(null);
   const [manifest, setManifest] = useState(null);
   const [appContent, setAppContent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [debugMsg, setDebugMsg] = useState('');
 
-  useEffect(() => {
-    setDebugMsg('Starting app load...');
+  const setSlug = () => {
     const slug = getSlugFromSubdomain();
-    setSlug(slug);
+    setSlugState(slug);
     if (!slug) {
       setError("Invalid app URL: missing slug.");
-      setLoading(false);
       setDebugMsg('No slug found in subdomain.');
-      return;
+      setLoading(false);
     }
-    setDebugMsg('Loading app resources for slug: ' + slug);
-    loadAppResources(slug);
+  }
+
+  useEffect(async () => {
+    setDebugMsg('Starting app load...');
+    setSlug();
+    const { htmlContent, jsContent, swContent } = await loadAppResources(slug);
+    setDebugMsg('All resources loaded. Setting app content...');
+    setAppContent({
+      html: htmlContent,
+      js: jsContent,
+      sw: swContent,
+      slug: slug
+    });
   }, []);
 
   const loadAppResources = async (slug) => {
     try {
-      setDebugMsg('Fetching manifest.json...');
-      const manifestResponse = await fetch(`/app/${slug}/manifest.json`);
-      if (!manifestResponse.ok) throw new Error("Manifest not found");
-      const manifest = await manifestResponse.json();
-      setManifest(manifest);
+      const manifestResponse = await loadResource('manifest.json', `/app/${slug}/manifest.json`);
+      const manifest = manifestResponse.json();
       setDebugMsg('Manifest loaded. Fetching index.html...');
-      const htmlResponse = await fetch(`/app/${slug}/index.html`);
-      if (!htmlResponse.ok) throw new Error("App HTML not found");
-      const htmlContent = await htmlResponse.text();
+      setManifest(manifest);
+
+      const htmlResponse = await loadResource('index.html', `/app/${slug}/index.html`);
+      const htmlContent = htmlResponse.text();
       setDebugMsg('index.html loaded. Fetching app.js...');
-      const jsResponse = await fetch(`/app/${slug}/app.js`);
-      if (!jsResponse.ok) throw new Error("App JavaScript not found");
-      const jsContent = await jsResponse.text();
+
+      const jsResponse = await loadResource('app.js', `/app/${slug}/app.js`);
+      const jsContent = jsResponse.text();
       setDebugMsg('app.js loaded. Fetching sw.js...');
-      const swResponse = await fetch(`/app/${slug}/sw.js`);
-      if (!swResponse.ok) throw new Error("Service worker not found");
-      const swContent = await swResponse.text();
+
+      const serviceWorker = await loadResource('sw.js', `/app/${slug}/sw.js`);
+      const swContent = serviceWorker.text();
       setDebugMsg('sw.js loaded. Pre-fetching model.onnx...');
-      setDebugMsg('All resources loaded. Setting app content...');
-      setAppContent({
-        html: htmlContent,
-        js: jsContent,
-        sw: swContent,
-        slug: slug
-      });
-      setLoading(false);
+
+      return {
+        htmlContent,
+        jsContent,
+        swContent
+      }
     } catch (err) {
       setError(`Failed to load app resources: ${err.message}`);
-      setLoading(false);
       setDebugMsg('Error: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
