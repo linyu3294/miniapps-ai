@@ -369,7 +369,15 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     }
   }
 
-
+  # ordered_cache_behavior {
+  #   path_pattern     = "/assets/*"
+  #   target_origin_id = local.pwa_shell_bucket_name
+  #   allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+  #   cached_methods   = ["GET", "HEAD"]
+  #   viewer_protocol_policy = "redirect-to-https"
+  #   compress               = true
+  #   cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  # }
   ordered_cache_behavior {
     path_pattern     = "/app/*/sw.js"
     target_origin_id = aws_s3_bucket.apps.id
