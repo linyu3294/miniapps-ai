@@ -3,36 +3,12 @@ import React, { useEffect, useState } from "react";
 interface AppContent {
   html: string;
   js: string;
-  sw: string;
+  serviceWorker: string;
   slug: string;
 }
 
 interface Manifest {
   [key: string]: any;
-}
-
-function getSlugFromSubdomain(): string | null {
-  try {
-    const parts = window.location.hostname.split("."); 
-    if (parts.length < 3) {
-      return null;
-    }
-    const slug = parts[0];
-    return slug;
-  } catch (error) {
-    console.error('Error getting slug from subdomain:', error);
-    return null;
-  }
-}
-
-const loadResource = async (resourceName: string, url: string): Promise<Response> => {
-  setDebugMsg('Loading resource: ' + `${resourceName}`);
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error(`Failed to load ${resourceName}: ${response.statusText}`);
-    throw new Error(`Failed to load ${resourceName}: ${response.statusText}`);
-  }
-  return response;
 }
 
 const App: React.FC = () => {
@@ -43,59 +19,87 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [debugMsg, setDebugMsg] = useState<string>('');
 
+  useEffect(() => {
+    const loadApp = async (): Promise<void> => {
+      setDebugMsg('Starting mini program ...');
+      setSlug();
+      if (slug) {
+        const { html, js, serviceWorker } = await loadAppResources(slug);
+        setDebugMsg('All mini program resources loaded. Setting mini program content...');
+        setAppContent({ html, js, serviceWorker, slug: slug });
+      }
+    };
+    loadApp();
+  }, []);
+
+  useEffect(() => {
+    if (appContent) {
+      setDebugMsg('Injecting mini program content...');
+      injectAppContent(appContent);
+    }
+  }, [appContent]);
+
+
+  const getSlugFromSubdomain = (): string | null => {
+    try {
+      const parts = window.location.hostname.split("."); 
+      if (parts.length < 3) {
+        return null;
+      }
+      const slug = parts[0];
+      return slug;
+    } catch (error) {
+      console.error('Error getting slug from subdomain:', error);
+      return null;
+    }
+  }
+
+  const loadResource = async (resourceName: string, url: string): Promise<Response> => {
+    setDebugMsg('Loading mini program resource: ' + `${resourceName}`);
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`Failed to load mini program resource: ${resourceName}: ${response.statusText}`);
+      throw new Error(`Failed to load mini program resource: ${resourceName}: ${response.statusText}`);
+    }
+    return response;
+  }
+
   const setSlug = (): void => {
     const slug = getSlugFromSubdomain();
     setSlugState(slug);
     if (!slug) {
-      setError("Invalid app URL: missing slug.");
+      setError("Invalid mini program URL: missing slug.");
       setDebugMsg('No slug found in subdomain.');
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    const loadApp = async (): Promise<void> => {
-      setDebugMsg('Starting app load...');
-      setSlug();
-      if (slug) {
-        const { htmlContent, jsContent, swContent } = await loadAppResources(slug);
-        setDebugMsg('All resources loaded. Setting app content...');
-        setAppContent({
-          html: htmlContent,
-          js: jsContent,
-          sw: swContent,
-          slug: slug
-        });
-      }
-    };
-    
-    loadApp();
-  }, []);
-
-  const loadAppResources = async (slug: string): Promise<{ htmlContent: string; jsContent: string; swContent: string }> => {
+  const loadAppResources = async (slug: string): Promise<AppContent> => {
     try {
       const manifestResponse = await loadResource('manifest.json', `/app/${slug}/manifest.json`);
       const manifest = await manifestResponse.json();
-      setDebugMsg('Manifest loaded. Fetching index.html...');
+      setDebugMsg('Mini app manifest loaded. Fetching index.html...');
       setManifest(manifest);
 
       const htmlResponse = await loadResource('index.html', `/app/${slug}/index.html`);
       const htmlContent = await htmlResponse.text();
-      setDebugMsg('index.html loaded. Fetching app.js...');
+      setDebugMsg('Mini app index.html loaded. Fetching app.js...');
 
       const jsResponse = await loadResource('app.js', `/app/${slug}/app.js`);
       const jsContent = await jsResponse.text();
-      setDebugMsg('app.js loaded. Fetching sw.js...');
+      setDebugMsg('Mini app app.js loaded. Fetching sw.js...');
 
       const serviceWorker = await loadResource('sw.js', `/app/${slug}/sw.js`);
       const swContent = await serviceWorker.text();
-      setDebugMsg('sw.js loaded. Pre-fetching model.onnx...');
+      setDebugMsg('Mini app sw.js (service worker) loaded. Pre-fetching model.onnx...');
 
       return {
-        htmlContent,
-        jsContent,
-        swContent
-      }
+        html: htmlContent,
+        js: jsContent,
+        serviceWorker: swContent,
+        slug: slug
+      } as AppContent;
+
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(`Failed to load app resources: ${errorMessage}`);
@@ -105,13 +109,6 @@ const App: React.FC = () => {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (appContent) {
-      setDebugMsg('Injecting app content...');
-      injectAppContent(appContent);
-    }
-  }, [appContent]);
 
   const ensureOrtLoaded = (): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -127,77 +124,65 @@ const App: React.FC = () => {
     });
   };
 
-  const injectAppContent = (content: AppContent): void => {
-    const appContainer = document.getElementById('app-container');
-    if (!appContainer) {
-      setDebugMsg('app-container div not found!');
-      return;
-    }
-    setDebugMsg('Parsing and injecting HTML...');
+  const injectMiniAppHtml = (appContainer: HTMLElement, content: AppContent): void => {
+    setDebugMsg('Parsing and injecting mini program HTML...');
     const parser = new DOMParser();
     const doc = parser.parseFromString(content.html, 'text/html');
     doc.querySelectorAll('script[src]').forEach(script => script.remove());
     appContainer.innerHTML = doc.body.innerHTML;
-    setDebugMsg('Injected HTML. Injecting styles...');
+  }
+
+  const injectMiniAppStyles = (doc: Document): void => {
+    setDebugMsg('Injecting mini program styles...');
     const styles = doc.querySelectorAll('style');
     styles.forEach(style => {
       if (!document.head.contains(style)) {
         document.head.appendChild(style.cloneNode(true));
       }
     });
-    setDebugMsg('Ensuring ONNX Runtime (ort) is loaded...');
-    ensureOrtLoaded().then(() => {
-      setDebugMsg('ONNX Runtime loaded. Registering service worker...');
-      if ('serviceWorker' in navigator && content.sw) {
-        registerServiceWorker(content.sw, content.slug);
-      }
-      setDebugMsg('Service worker registered. Executing app JS...');
-      try {
-        const appScript = document.createElement('script');
-        const updatedJsContent = content.js.replace(
-          /'model\.onnx'/g, 
-          `'/app/${content.slug}/model.onnx'`
-        );
-        appScript.textContent = updatedJsContent;
-        document.body.appendChild(appScript);
-        setDebugMsg('App JS executed. Calling window.startShapeApp if exists...');
-        if ((window as any).startShapeApp) {
-          setDebugMsg('Waiting for #cameraBtn to exist before starting app...');
-          const waitForBtn = (): void => {
-            if (document.getElementById('cameraBtn')) {
-              setDebugMsg('Found #cameraBtn, starting app...');
-              (window as any).startShapeApp();
-            } else {
-              setTimeout(waitForBtn, 50);
-            }
-          };
-          waitForBtn();
-        } else {
-          setDebugMsg('window.startShapeApp not found!');
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        setDebugMsg('Error executing app JavaScript: ' + errorMessage);
-        console.error('Error executing app JavaScript:', error);
-      }
-    }).catch((err) => {
-      setDebugMsg('Failed to load ONNX Runtime: ' + err);
-      console.error('Failed to load ONNX Runtime:', err);
-    });
-  };
+  }
 
-  const registerServiceWorker = async (swContent: string, slug: string): Promise<void> => {
+  const registerMiniAppServiceWorkerForShell = async (content: AppContent) => {
+    setDebugMsg('Registering mini program service worker...');
+    if ('serviceWorker' in navigator && content.serviceWorker) {
+        // Register the service worker with the correct Shell URL scope
+        const miniAppServiceWorkerUrl = `/app/${content.slug}/sw.js`;
+        const shellDomainScope = '/';
+        await navigator.serviceWorker.register(
+          miniAppServiceWorkerUrl, {
+            scope: shellDomainScope
+          });
+    }
+  }
+
+  const executeMiniAppJs = async (content: AppContent) => {
+    setDebugMsg('Executing mini program JS...');
+    const appScript = document.createElement('script');
+    const updatedJsContent = content.js.replace(
+      /'model\.onnx'/g, 
+      `'/app/${content.slug}/model.onnx'`
+    );
+    appScript.textContent = updatedJsContent;
+    document.body.appendChild(appScript);
+  }
+
+  const injectAppContent = async (content: AppContent) => {
+    const appContainer = document.getElementById('app-container');
+    if (!appContainer) {
+      setDebugMsg('Unable to inject mini program content: app-container div not found!');
+      return;
+    }
     try {
-      // Register the service worker with the correct scope and real URL
-      const swUrl = `/app/${slug}/sw.js`;
-      const registration = await navigator.serviceWorker.register(swUrl, {
-        scope: '/'
-      });
-      
-      console.log('Service worker registered for app:', slug, registration);
-      
+      await ensureOrtLoaded()
+      injectMiniAppHtml(appContainer, content);
+      injectMiniAppStyles(document);
+      registerMiniAppServiceWorkerForShell(content);
+      executeMiniAppJs(content);
+      setDebugMsg('Service worker registered. Executing app JS...');
     } catch (error) {
-      console.error('Failed to register service worker for app:', slug, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setDebugMsg('Unable to inject mini program content: ' + errorMessage);
+      console.error('Unable to inject mini program content: ', error);
     }
   };
 
@@ -207,11 +192,18 @@ const App: React.FC = () => {
 
   return (
     <div>
-      <div style={{background:'#ffeeba',color:'#856404',padding:'8px',margin:'8px 0',borderRadius:'4px',fontSize:'14px'}}>
+      <div 
+        style={{
+          background:'#ffeeba',
+          color:'#856404',
+          padding:'8px',
+          margin:'8px 0',
+          borderRadius:'4px',
+          fontSize:'14px'
+      }}>
         <b>DEBUG:</b> {debugMsg}
       </div>
       <div id="app-container">
-        {/* App content will be injected here */}
         <div>Loading app content...</div>
       </div>
     </div>
