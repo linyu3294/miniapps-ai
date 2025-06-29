@@ -1,5 +1,40 @@
-const CACHE_NAME = 'shape-classifier-v1';
-const MODEL_CACHE_NAME = 'shape-classifier-model-v1';
+const VERSION = '1.0.0';
+const CACHE_NAME = `shape-classifier-app-${VERSION}`;
+const MODEL_CACHE_NAME = `shape-classifier-model-${VERSION}`;
+const STATIC_CACHE_NAME = `shape-classifier-static-${VERSION}`;
+const CDN_CACHE_NAME = `shape-classifier-cdn-${VERSION}`;
+
+// Development mode detection
+const isDevelopment = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+
+// Asset categorization for different caching strategies
+const ASSET_STRATEGIES = {
+  // Never cache in development, cache-first in production
+  'app-critical': {
+    files: ['/app.js', '/index.html'],
+    strategy: isDevelopment ? 'network-first' : 'stale-while-revalidate',
+    maxAge: isDevelopment ? 0 : 3600 // 1 hour in production
+  },
+  // Always cache aggressively - rarely change
+  'static': {
+    files: ['/manifest.json', '/icon.png'],
+    strategy: 'cache-first',
+    maxAge: 86400 * 30 // 30 days
+  },
+  // Cache but validate frequently - external dependencies
+  'cdn': {
+    files: ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js'],
+    strategy: 'stale-while-revalidate',
+    maxAge: 86400 * 7 // 7 days
+  },
+  // Large files - special handling for range requests
+  'model': {
+    files: ['/model.onnx'],
+    strategy: isDevelopment ? 'network-first' : 'cache-first',
+    maxAge: isDevelopment ? 0 : 86400 * 7, // 7 days in production
+    supportRangeRequests: true
+  }
+};
 
 const urlsToCache = [
   '/',
@@ -10,139 +45,209 @@ const urlsToCache = [
   'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js'
 ];
 
-// Install event - cache resources
+const getCacheForAsset = (url) => {
+  if (url.includes('cdn.jsdelivr.net')) return CDN_CACHE_NAME;
+  if (url.endsWith('model.onnx')) return MODEL_CACHE_NAME;
+  if (url.endsWith('.png') || url.endsWith('manifest.json')) return STATIC_CACHE_NAME;
+  return CACHE_NAME;
+};
+
+const getStrategyForAsset = (url) => {
+  for (const [type, config] of Object.entries(ASSET_STRATEGIES)) {
+    if (config.files.some(file => url.includes(file) || url.endsWith(file))) {
+      return config;
+    }
+  }
+  return ASSET_STRATEGIES['app-critical']; // default
+};
+
+const cacheAppResources = async () => {
+  const cachePromises = urlsToCache.map(async (url) => {
+    try {
+      const cacheUrl = url.startsWith('http') ? url : self.location.origin + url;
+      const cacheName = getCacheForAsset(cacheUrl);
+      const cache = await caches.open(cacheName);
+      
+      await cache.add(cacheUrl);
+      console.log(`Cached: ${cacheUrl} in ${cacheName}`);
+    } catch (error) {
+      console.warn(`Failed to cache ${url}:`, error);
+    }
+  });
+  return Promise.all(cachePromises);
+};
+
+const cacheModel = async () => {
+  // In development, don't pre-cache large models - load on demand
+  if (!isDevelopment) {
+    try {
+      const cache = await caches.open(MODEL_CACHE_NAME);
+      await cache.add('/model.onnx');
+      console.log('Model pre-cached');
+    } catch (error) {
+      console.warn('Failed to pre-cache model:', error);
+    }
+  }
+};
+
 self.addEventListener('install', (event) => {
+  console.log('Service Worker installing...');
   event.waitUntil(
     Promise.all([
-      // Cache app resources
-      caches.open(CACHE_NAME).then((cache) => {
-        console.log('Opened app cache');
-        const cachePromises = urlsToCache.map(url => {
-          const cacheUrl = url.startsWith('http') ? url : self.location.origin + url;
-          return cache.add(cacheUrl).catch(() => {});
-        });
-        return Promise.all(cachePromises);
-      }),
-      
-      // Cache the model separately (it's large and needs special handling)
-      caches.open(MODEL_CACHE_NAME).then((cache) => {
-        console.log('Opened model cache');
-        // Optionally pre-cache model.onnx if desired
-        // return cache.add('/model.onnx').catch(() => {});
-        return Promise.resolve();
-      })
+      cacheAppResources(),
+      cacheModel()
     ])
   );
+  // Force activation in development
+  if (isDevelopment) {
+    self.skipWaiting();
+  }
 });
 
-// Fetch event - serve from cache when offline
+// Enhanced fetch handler with strategy-based routing
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  const strategy = getStrategyForAsset(event.request.url);
   
-  // Special handling for model.onnx with Range requests
-  if (url.pathname.endsWith('model.onnx') && event.request.headers.has('range')) {
-    event.respondWith(
-      caches.open(MODEL_CACHE_NAME).then(async (cache) => {
-        let response = await cache.match(event.request.url);
-        if (!response) {
-          response = await fetch(event.request);
-          await cache.put(event.request.url, response.clone());
-        }
-        return response;
-      })
-    );
-    return;
-  }
-  
-  // Special handling for model.onnx (full fetch)
   if (url.pathname.endsWith('model.onnx')) {
-    event.respondWith(
-      caches.open(MODEL_CACHE_NAME)
-        .then((cache) => {
-          return cache.match(event.request)
-            .then((response) => {
-              if (response) {
-                console.log('Serving model from cache');
-                return response;
-              }
-              
-              // If not in cache, fetch from network
-              return fetch(event.request)
-                .then((networkResponse) => {
-                  if (networkResponse.ok) {
-                    // Cache the model for future use
-                    cache.put(event.request, networkResponse.clone());
-                    console.log('Model cached for future use');
-                  }
-                  return networkResponse;
-                });
-            });
-        })
-    );
-    return;
+    event.respondWith(handleModelRequest(event.request, strategy));
+  } else {
+    event.respondWith(handleRequest(event.request, strategy));
   }
-  
-  // Handle other resources
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached version or fetch from network
-        if (response) {
-          return response;
-        }
-        
-        // Clone the request because it's a stream
-        const fetchRequest = event.request.clone();
-        
-        return fetch(fetchRequest).then((response) => {
-          // Check if we received a valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-          
-          // Clone the response because it's a stream
-          const responseToCache = response.clone();
-          
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-          
-          return response;
-        });
-      })
-  );
 });
 
-// Activate event - clean up old caches
+async function handleModelRequest(request, strategy) {
+  const modelCache = await caches.open(MODEL_CACHE_NAME);
+  
+  // Handle range requests (never cache range responses)
+  if (request.headers.has('range')) {
+    console.log('Range request detected, fetching from network');
+    return fetch(request);
+  }
+  // Strategy-based handling for full file requests
+  switch (strategy.strategy) {
+    case 'network-first':
+      return networkFirst(request, modelCache);
+    case 'cache-first':
+      return cacheFirst(request, modelCache);
+    case 'stale-while-revalidate':
+      return staleWhileRevalidate(request, modelCache);
+    default:
+      return fetch(request);
+  }
+}
+
+async function handleRequest(request, strategy) {
+  const cacheName = getCacheForAsset(request.url);
+  const cache = await caches.open(cacheName);
+  
+  switch (strategy.strategy) {
+    case 'network-first':
+      return networkFirst(request, cache);
+    case 'cache-first':
+      return cacheFirst(request, cache);
+    case 'stale-while-revalidate':
+      return staleWhileRevalidate(request, cache);
+    default:
+      return fetch(request);
+  }
+}
+
+async function networkFirst(request, cache) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      // Clone and cache the response
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    // Fall back to cache
+    const cached = await cache.match(request);
+    if (cached) {
+      console.log('Network failed, serving from cache:', request.url);
+      return cached;
+    }
+    throw error;
+  }
+}
+
+async function cacheFirst(request, cache) {
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
+  
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    // For navigation requests, return offline fallback
+    if (request.mode === 'navigate') {
+      const offlineResponse = await cache.match('/index.html');
+      if (offlineResponse) {
+        return offlineResponse;
+      }
+    }
+    throw error;
+  }
+}
+
+async function staleWhileRevalidate(request, cache) {
+  const cached = await cache.match(request);
+  
+  // Always fetch in background to update cache
+  const fetchPromise = fetch(request).then(response => {
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  }).catch(error => {
+    console.warn('Background fetch failed:', error);
+  });
+  
+  // Return cached version immediately if available
+  if (cached) {
+    // Don't await the background fetch
+    fetchPromise;
+    return cached;
+  }
+  
+  // If no cached version, wait for network
+  return fetchPromise;
+}
+
+const deleteOldCaches = async () => {
+  const cacheNames = await caches.keys();
+  const currentCaches = [CACHE_NAME, MODEL_CACHE_NAME, STATIC_CACHE_NAME, CDN_CACHE_NAME];
+  
+  return Promise.all(
+    cacheNames.map((cacheName) => {
+      if (!currentCaches.includes(cacheName)) {
+        console.log('Deleting old cache:', cacheName);
+        return caches.delete(cacheName);
+      }
+    })
+  );
+};
+
 self.addEventListener('activate', (event) => {
+  console.log('Service Worker activating...');
   event.waitUntil(
     Promise.all([
-      caches.keys().then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((cacheName) => {
-            if (cacheName !== CACHE_NAME && cacheName !== MODEL_CACHE_NAME) {
-              console.log('Deleting old cache:', cacheName);
-              return caches.delete(cacheName);
-            }
-          })
-        );
-      })
+      deleteOldCaches(),
+      // Take control immediately in development
+      isDevelopment ? self.clients.claim() : Promise.resolve()
     ])
   );
-});
-
-// Handle background sync for model updates
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'model-update') {
-    event.waitUntil(updateModel());
-  }
 });
 
 async function updateModel() {
   try {
     const cache = await caches.open(MODEL_CACHE_NAME);
-    // Use the correct model path
     const modelPath = self.location.pathname.includes('/app/') 
       ? self.location.pathname.replace(/\/[^\/]*$/, '/model.onnx')
       : '/model.onnx';
@@ -154,4 +259,34 @@ async function updateModel() {
   } catch (error) {
     console.error('Failed to update model:', error);
   }
-} 
+}
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'model-update') {
+    event.waitUntil(updateModel());
+  }
+});
+
+// Handle messages from the main thread
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  
+  // Allow manual cache clearing in development
+  if (event.data && event.data.type === 'CLEAR_CACHE' && isDevelopment) {
+    event.waitUntil(
+      caches.keys().then(cacheNames => 
+        Promise.all(cacheNames.map(name => caches.delete(name)))
+      ).then(() => {
+        console.log('All caches cleared');
+        // Notify the client
+        self.clients.matchAll().then(clients => {
+          clients.forEach(client => {
+            client.postMessage({ type: 'CACHE_CLEARED' });
+          });
+        });
+      })
+    );
+  }
+});
