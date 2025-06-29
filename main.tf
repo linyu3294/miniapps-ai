@@ -327,6 +327,28 @@ resource "aws_cloudfront_function" "path_rewrite_function" {
 # ---------------------------------------------
 # Main Multi-Origin CloudFront Distribution
 # ---------------------------------------------
+# Using short cache for development
+# TODO: Use a more appropriate cache policy for production (Managed-CachingOptimized)
+resource "aws_cloudfront_cache_policy" "short_cache" {
+  name        = "ShortCache"
+  comment     = "Short cache for development"
+  default_ttl = 60     # 1 minute
+  max_ttl     = 300    # 5 minutes
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip = true
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    cookies_config {
+      cookie_behavior = "none"
+    }
+  }
+}
 
 resource "aws_cloudfront_response_headers_policy" "service_worker_allowed" {
   name = "ServiceWorkerAllowedHeader"
@@ -369,8 +391,9 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     
     viewer_protocol_policy = "redirect-to-https"
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
-
+    # cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
+    
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.path_rewrite_function.arn
@@ -393,7 +416,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.service_worker_allowed.id
   }
   ordered_cache_behavior {
@@ -403,7 +426,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.service_worker_allowed.id
   }
   # Path-Based Behaviors: Serve mini-app assets (with file extensions) from the 'apps' bucket
@@ -414,7 +437,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   ordered_cache_behavior {
     path_pattern     = "/app/*.json"
@@ -423,7 +446,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   ordered_cache_behavior {
     path_pattern     = "/app/*.png"
@@ -432,7 +455,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   ordered_cache_behavior {
     path_pattern     = "/app/*.ico"
@@ -441,7 +464,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   ordered_cache_behavior {
     path_pattern     = "/app/*.onnx"
@@ -450,7 +473,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   ordered_cache_behavior {
     path_pattern     = "/app/*.html"
@@ -459,7 +482,7 @@ resource "aws_cloudfront_distribution" "main_distribution" {
     cached_methods   = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
-    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id        = aws_cloudfront_cache_policy.short_cache.id
   }
   restrictions {
     geo_restriction {
