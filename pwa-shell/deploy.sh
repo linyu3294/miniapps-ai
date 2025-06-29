@@ -49,7 +49,7 @@ API_URL=$(terraform output -raw api_gateway_url)
 echo "🔨 Building PWA shell..."
 cd "$PROJECT_ROOT/pwa-shell"
 npm install
-VITE_API_URL=$API_URL npm run build
+npm run build
 
 cd ..
 
