@@ -5,17 +5,18 @@ class ShapeClassifier {
     this.session = null;
     this.isModelLoaded = false;
     this.stream = null;
-    this.shapeClasses = ['circle', 'square', 'triangle', 'octagon', 'hexagon', 'star'];
+    this.shapeClasses = ['circle', 'square', 'triangle', 'hexagon', 'octagon', 'star'];
     
     this.initializeUI();
     this.loadModel();
   }
 
   async loadModel() {
+    alert('Loading medium-resolution model (56x56)...');
     try {
       this.showMessage('Loading model...', 'loading');
       
-      // Load the ONNX model
+      // Load the medium-resolution ONNX model
       this.session = await ort.InferenceSession.create('model.onnx');
       this.isModelLoaded = true;
       
@@ -165,12 +166,17 @@ class ShapeClassifier {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     
-    // Set canvas size to match model input (28x28 for your model)
-    const inputSize = 28;
+    // Use medium resolution (56x56) to match training data
+    const inputSize = 56;
     canvas.width = inputSize;
     canvas.height = inputSize;
     
-    // Draw and resize image
+    // Fill with white background
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, inputSize, inputSize);
+    
+    // Draw image with high quality
+    ctx.imageSmoothingEnabled = true;
     ctx.drawImage(imageElement, 0, 0, inputSize, inputSize);
     
     // Get image data
@@ -187,11 +193,37 @@ class ShapeClassifier {
       const b = data[i * 4 + 2];
       const gray = 0.299 * r + 0.587 * g + 0.114 * b;
       
-      // Normalize to 0-1
-      tensor[i] = gray / 255.0;
+      // Normalize to 0-1 and invert (Quick Draw has white strokes on black background)
+      tensor[i] = 1.0 - (gray / 255.0);
     }
     
-    // Reshape to match model input format (1, 1, 28, 28) for grayscale
+    // Debug: Log tensor statistics to see what the model is receiving
+    const tensorArray = Array.from(tensor);
+    const min = Math.min(...tensorArray);
+    const max = Math.max(...tensorArray);
+    const mean = tensorArray.reduce((a, b) => a + b) / tensorArray.length;
+    console.log(`Tensor stats - Min: ${min.toFixed(3)}, Max: ${max.toFixed(3)}, Mean: ${mean.toFixed(3)}`);
+    
+    // Debug: Visualize the tensor as a smaller ASCII representation (downsample for readability)
+    console.log('Tensor visualization (downsampled to 28x28 for display, . = low, # = high):');
+    let visualization = '';
+    const displaySize = 28;
+    const scale = inputSize / displaySize; // 56/28 = 2
+    
+    for (let y = 0; y < displaySize; y++) {
+      let row = '';
+      for (let x = 0; x < displaySize; x++) {
+        // Sample from the original tensor at scaled coordinates
+        const originalY = Math.floor(y * scale);
+        const originalX = Math.floor(x * scale);
+        const val = tensorArray[originalY * inputSize + originalX];
+        row += val > 0.5 ? '#' : (val > 0.2 ? '*' : '.');
+      }
+      visualization += row + '\n';
+    }
+    console.log(visualization);
+    
+    // Reshape to match model input format (1, 1, 56, 56) for grayscale
     return new ort.Tensor('float32', tensor, [1, 1, inputSize, inputSize]);
   }
 
@@ -202,9 +234,15 @@ class ShapeClassifier {
     
     const results = await this.session.run(feeds);
     
-    // Get the output
+    // Get the output (raw logits)
     const output = results[this.session.outputNames[0]];
-    const probabilities = Array.from(output.data);
+    const logits = Array.from(output.data);
+    
+    // Apply softmax to convert logits to probabilities
+    const maxLogit = Math.max(...logits);
+    const expLogits = logits.map(x => Math.exp(x - maxLogit)); // Subtract max for numerical stability
+    const sumExp = expLogits.reduce((a, b) => a + b, 0);
+    const probabilities = expLogits.map(x => x / sumExp);
     
     // Create results array with class names and probabilities
     const resultsArray = this.shapeClasses.map((className, index) => ({
