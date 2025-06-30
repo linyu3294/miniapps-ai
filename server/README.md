@@ -57,7 +57,6 @@ client_domain    = "https://www.yourdomain.com"
 2. **Deploy:**
 ```bash
 cd server && ./build.sh    # Build Lambda functions
-cd .. && terraform apply   # Deploy infrastructure
 ```
 
 ## API
