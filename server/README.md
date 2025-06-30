@@ -121,30 +121,7 @@ cd pwa-shell && ./deploy.sh
 4. Upload to S3
 5. Invalidate CloudFront cache
 
-### Configuration
-```bash
-# Get deployment outputs
-terraform output api_gateway_url
-terraform output cloudfront_domain_name
-```
 
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Upload fails (403) | Check Cognito user in Publisher group |
-| App won't load (404) | Verify S3 bucket permissions |
-| Build fails | Ensure Go 1.21+, run `go mod tidy` |
-| DNS issues | Check Route 53 nameservers |
-
-### Debug Commands
-```bash
-# Check Lambda logs
-aws logs tail /aws/lambda/miniapps-ai-prod-publisher
-
-# Test S3 access
-aws s3 ls s3://miniapps-apps-prod/
-```
 
 ---
 
