@@ -153,7 +153,6 @@ max_ttl     = 300    // 5 minutes
 ```javascript
 // App Shell (Always cache)
 - index.html
-- main.js, main.css
 - manifest.json
 
 // Mini-App Assets (Cache per app)
@@ -163,23 +162,6 @@ max_ttl     = 300    // 5 minutes
 - {slug}/assets/*
 
 
-## 📚 Mini-App Development Guide
-
-### Required Files Structure
-```
-your-mini-app.zip
-├── manifest.json      # App metadata and configuration
-├── index.html         # Entry point HTML
-├── app.js            # Main application logic
-├── model.onnx        # ML model (optional, <25MB)
-├── service-worker.js  # Offline support (optional)
-├── icons/            # App icons for installation
-│   ├── icon-192.png
-│   └── icon-512.png
-└── assets/           # Additional assets
-    ├── styles.css
-    └── images/
-```
 
 ## 📄 License
 
