@@ -2,7 +2,7 @@
 
 > **AWS serverless backend for the MiniApps platform**
 
-## Architecture
+### Architecture
 
 The server provides a complete serverless backend using AWS:
 
@@ -37,7 +37,6 @@ The server provides a complete serverless backend using AWS:
 | **Cognito** | Publisher authentication | User pools + JWT |
 | **Route 53** | DNS management | Wildcard subdomains |
 
-## Quick Start
 
 ### Prerequisites
 ```bash
@@ -59,7 +58,6 @@ client_domain    = "https://www.yourdomain.com"
 cd server && ./build.sh    # Build Lambda functions
 ```
 
-## Infrastructure Details
 
 ### Multi-Origin CloudFront Distribution
 
