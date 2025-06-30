@@ -11,7 +11,7 @@ The PWA Shell App is one of two main client applications in the MiniApps platfor
 ```
 ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
 │   Platform App      │    │   PWA Shell App     │    │   AWS Backend       │
-│   (Netlify)        │    │   (CloudFront)      │    │   (API Gateway)     │
+│   (Netlify)         │    │   (CloudFront)      │    │   (API Gateway)     │
 ├─────────────────────┤    ├─────────────────────┤    ├─────────────────────┤
 │ • Publisher Portal  │    │ • App Bootstrapper  │    │ • Lambda Functions  │
 │ • Subscriber Portal │    │ • Dynamic Loader    │    │ • S3 Storage        │
