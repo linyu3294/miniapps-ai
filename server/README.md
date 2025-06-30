@@ -72,7 +72,6 @@ CloudFront Distribution
 └── Origin 2: Apps Bucket  
     └── Serves: Individual mini-app assets
 ```
-### S3 Storage
 
 ```
 apps_bucket/
