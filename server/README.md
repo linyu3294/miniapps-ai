@@ -59,32 +59,6 @@ client_domain    = "https://www.yourdomain.com"
 cd server && ./build.sh    # Build Lambda functions
 ```
 
-## API
-
-### Publisher Endpoint
-```
-POST /publish/{app-slug}/version/{version-id}
-Authorization: Bearer <cognito-jwt>
-```
-
-**Request:**
-```json
-{
-  "manifest": {...},
-  "files": [
-    {"filename": "model.onnx", "size": 23455678, "type": "application/octet-stream"}
-  ],
-  "entrypoint": "index.html"
-}
-```
-
-**Response:**
-```json
-{
-  "presigned_url": "https://s3.amazonaws.com/bucket/uploads/..."
-}
-```
-
 ## Infrastructure Details
 
 ### S3 Storage
@@ -106,20 +80,6 @@ pwa_shell_bucket/
 - **Multi-origin**: Serves both PWA shell and app assets
 - **URL Rewriting**: Routes `/app/{slug}/` to shell or assets
 - **Caching**: 1-5 min TTL (dev), optimized (prod)
-
-## Deployment
-
-### Full Deployment
-```bash
-cd pwa-shell && ./deploy.sh
-```
-
-**Process:**
-1. Build Lambda functions
-2. Deploy Terraform infrastructure  
-3. Build React app
-4. Upload to S3
-5. Invalidate CloudFront cache
 
 
 
