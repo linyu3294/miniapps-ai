@@ -1,1 +1,0 @@
-console.log("Example Mini App script loaded!"); 
