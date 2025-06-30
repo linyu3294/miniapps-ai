@@ -64,23 +64,33 @@ The PWA Shell App is one of two main client applications in the MiniApps platfor
 git clone <repository>
 cd pwa-shell
 npm install
+```
 
 ## 🌐 URL Routing & App Loading
 
 ### URL Pattern
 ```
-https://app.yourdomain.com/app/{slug}/
+https://{app-slug}.miniprograms.app/
 ```
 
 **Examples:**
-- `https://app.miniprograms.app/app/shape/` → Shape Detection app
-- `https://app.miniprograms.app/app/plant/` → Plant Recognition app
-- `https://app.miniprograms.app/app/sentiment/` → Sentiment Analysis app
+- `https://shape.miniprograms.app` → Shape Detection app
+- `https://plant.miniprograms.app` → Plant Recognition app
+- `https://sentiment.miniprograms.app` → Sentiment Analysis app
 
 ### Loading Sequence
 1. **URL Parse**: Extract app slug from URL path
+    - slug is the first part of the subdomain
+    - in https://plant.miniprograms.app, the slug is plant
 2. **Manifest Fetch**: Request `manifest.json` from S3
+    - fetches resources from {domain}/app/{slug}/manifest.json
+    - for https://plant.miniprograms.app, 
+    - ^ the manifest file is located at https://plant.miniprograms.app/app/plant/manifest.json
 3. **Asset Download**: Fetch required assets (HTML, JS, models)
+    - resources are dynamically allocated at the extended paths corresponding to the apps
+    - https://plant.miniprograms.app/app/plant/app.js
+    - https://plant.miniprograms.app/app/plant/model.onnx
+    - https://plant.miniprograms.app/app/plant/index.html
 4. **Cache Strategy**: Store assets based on caching policy
 5. **App Bootstrap**: Initialize and render the mini-app
 6. **ML Setup**: Load and initialize ML models if present
