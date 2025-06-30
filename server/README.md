@@ -72,6 +72,17 @@ CloudFront Distribution
 └── Origin 2: Apps Bucket  
     └── Serves: Individual mini-app assets
 ```
+### S3 Storage
+
+```
+apps_bucket/
+├── uploads/{slug}/{version}/    # Temporary uploads
+└── app/{slug}/                  # Processed apps
+
+pwa_shell_bucket/
+├── index.html                   # React shell
+└── assets/                      # JS/CSS bundles
+```
 
 #### Origin Routing Strategy
 
@@ -113,20 +124,3 @@ GET /app/shape/           → PWA Shell → React router handles /app/shape/
 GET /app/shape/model.onnx → Apps Bucket → Direct file serve
 GET /app/shape/app.js     → Apps Bucket → Direct file serve
 ```
-
-### S3 Storage
-
-```
-apps_bucket/
-├── uploads/{slug}/{version}/    # Temporary uploads
-└── app/{slug}/                  # Processed apps
-
-pwa_shell_bucket/
-├── index.html                   # React shell
-└── assets/                      # JS/CSS bundles
-```
-
-### Lambda Functions
-- **Publisher**: Validates uploads, generates presigned URLs
-- **Unzip**: Processes uploaded ZIPs, extracts to final location
-**For PWA Shell documentation:** [pwa-shell/README.md](../pwa-shell/README.md) 
