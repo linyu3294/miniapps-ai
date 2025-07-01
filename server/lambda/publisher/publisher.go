@@ -111,7 +111,6 @@ func validatePublisher(request events.APIGatewayV2HTTPRequest) (events.APIGatewa
 }
 
 func validatePublishRequest(request PublishRequest) (events.APIGatewayV2HTTPResponse, error) {
-
 	if request.Manifest.Name == "" {
 		return createErrorResponse(400, "Manifest name is required")
 	}
@@ -139,7 +138,6 @@ func validatePublishRequest(request PublishRequest) (events.APIGatewayV2HTTPResp
 	if request.PublisherId == "" {
 		return createErrorResponse(400, "Publisher id is required")
 	}
-
 	return events.APIGatewayV2HTTPResponse{}, nil
 }
 
@@ -157,7 +155,6 @@ func validateModelOnnxFile(files []File) (events.APIGatewayV2HTTPResponse, error
 	if modelOnnxFile.Size > 25*1024*1024 {
 		return createErrorResponse(400, "The model.onnx file size exceeds 25MB")
 	}
-
 	return events.APIGatewayV2HTTPResponse{}, nil
 }
 
@@ -189,14 +186,12 @@ func validateAppFiles(files []File) (events.APIGatewayV2HTTPResponse, error) {
 			htmlFiles++
 		}
 	}
-
 	if jsFiles == 0 && wasmFiles == 0 {
 		return createErrorResponse(400, "There must be at least one .js file or .wasm file")
 	}
 	if htmlFiles == 0 {
 		return createErrorResponse(400, "There must be at least one html file")
 	}
-
 	return events.APIGatewayV2HTTPResponse{}, nil
 }
 
