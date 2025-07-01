@@ -87,7 +87,6 @@ func validatePublisher(request events.APIGatewayV2HTTPRequest) (events.APIGatewa
 		log.Println("Group claim is not in the expected format '[...]'")
 		return createErrorResponse(403, "Invalid group format in token.")
 	}
-
 	trimmedGroups := groupsClaim[1 : len(groupsClaim)-1]
 	var groupsList []string
 	if trimmedGroups != "" {
@@ -106,7 +105,6 @@ func validatePublisher(request events.APIGatewayV2HTTPRequest) (events.APIGatewa
 	if !isPublisher {
 		return createErrorResponse(403, "Access denied. Publisher role required.")
 	}
-
 	return events.APIGatewayV2HTTPResponse{}, nil
 }
 
