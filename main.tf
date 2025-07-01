@@ -119,6 +119,18 @@ resource "aws_cognito_user_pool" "main" {
     }
   }
 
+   schema {
+    attribute_data_type = "String"
+    name               = "preferred_roles"
+    required           = false
+    mutable           = true
+    
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 100
+    }
+  }
+
   tags = local.tags
 }
 
@@ -133,11 +145,18 @@ resource "aws_cognito_user_pool_client" "client" {
   ]
 }
 
+resource "aws_cognito_user_group" "subscriber" {
+  name         = "Subscriber"
+  description  = "Subscriber group with access to app marketplace"
+  user_pool_id = aws_cognito_user_pool.main.id
+  precedence   = 1
+}
+
 resource "aws_cognito_user_group" "publisher" {
   name         = "Publisher"
   description  = "Publisher group with access to publishing features"
   user_pool_id = aws_cognito_user_pool.main.id
-  precedence   = 1
+  precedence   = 2
 }
 
 # ---------------------------------------------
@@ -170,6 +189,8 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
   }
 }
 
+// ----- TODO: Removepublisher lambda api gateway integration --------
+
 resource "aws_apigatewayv2_integration" "publisher" {
   api_id           = aws_apigatewayv2_api.main.id
   integration_type = "AWS_PROXY"
@@ -196,15 +217,93 @@ resource "aws_lambda_permission" "publisher_apigw" {
   source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }
 
+// ----- TODO: Remove publisher lambda api gateway integration --------
+
+
+
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.main.id
   name        = "default"
   auto_deploy = true
 }
 
+
+# ---------------------------------------------
+# User Lambda Function
+# ---------------------------------------------
+resource "aws_iam_role" "user_exec" {
+  name = "${var.project_name}-${var.environment}-lambda-user-exec-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole",
+      Effect    = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_lambda_function" "user" {
+  filename         = "server/lambda/user/user.zip"
+  source_code_hash = filebase64sha256("server/lambda/user/user.zip")
+  function_name    = "${var.project_name}-user-${var.environment}"
+  role            = aws_iam_role.user_exec.arn
+  handler         = "user"
+  runtime         = "provided.al2"
+  architectures   = ["x86_64"]
+
+  environment {
+    variables = {}
+  }
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "user_basic_policy" {
+  role       = aws_iam_role.user_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "user_cognito" {
+  name = "${var.project_name}-${var.environment}-user-cognito-policy"
+  role = aws_iam_role.user_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "cognito-idp:AdminAddUserToGroup",
+          "cognito-idp:AdminRemoveUserFromGroup",
+        ],
+        Resource = aws_cognito_user_pool.main.arn
+      }
+    ]
+  })
+}
+
+
 # ---------------------------------------------
 # Publisher Lambda Function
 # ---------------------------------------------
+resource "aws_iam_role" "publisher_exec" {
+  name = "${var.project_name}-${var.environment}-lambda-publisher-exec-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole",
+      Effect    = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
 resource "aws_lambda_function" "publisher" {
   filename         = "server/lambda/publisher/publisher.zip"
   source_code_hash = filebase64sha256("server/lambda/publisher/publisher.zip")
@@ -221,21 +320,6 @@ resource "aws_lambda_function" "publisher" {
   }
 
   tags = local.tags
-}
-
-
-resource "aws_iam_role" "publisher_exec" {
-  name = "${var.project_name}-${var.environment}-lambda-publisher-exec-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole",
-      Effect    = "Allow",
-      Principal = {
-        Service = "lambda.amazonaws.com"
-      }
-    }]
-  })
 }
 
 resource "aws_iam_role_policy_attachment" "publisher_basic_policy" {
