@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import AuthComponent from './Auth';
 import PublisherComponent from './Publisher';
+import SubscriberComponent from './Subscriber';
 import './HomePage.css';
 
 const HomePage = (): React.JSX.Element => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isPublisher, setIsPublisher] = useState<boolean>(false);
-  const [currentView, setCurrentView] = useState<'auth' | 'publisher'>('auth');
+  const [isSubscriber, setIsSubscriber] = useState<boolean>(false);
+  const [currentView, setCurrentView] = useState<'auth' | 'publisher' | 'subscriber'>('auth');
 
   useEffect(() => {
     checkAuthState();
@@ -22,14 +24,18 @@ const HomePage = (): React.JSX.Element => {
       
       setIsAuthenticated(true);
       setIsPublisher(groups.includes('Publisher'));
+      setIsSubscriber(groups.includes('Subscriber'));
       
-      // Auto-switch to publisher view if user is authenticated and is a publisher
+      // Auto-switch to appropriate view based on user role
       if (groups.includes('Publisher')) {
         setCurrentView('publisher');
+      } else if (groups.includes('Subscriber')) {
+        setCurrentView('subscriber');
       }
     } catch (error) {
       setIsAuthenticated(false);
       setIsPublisher(false);
+      setIsSubscriber(false);
       setCurrentView('auth');
     }
   };
@@ -37,6 +43,7 @@ const HomePage = (): React.JSX.Element => {
   const handleSignOut = (): void => {
     setIsAuthenticated(false);
     setIsPublisher(false);
+    setIsSubscriber(false);
     setCurrentView('auth');
   };
 
@@ -50,21 +57,29 @@ const HomePage = (): React.JSX.Element => {
         <div className="nav-content">
           <h1>MiniApps AI Publisher</h1>
           <div className="nav-buttons">
+            {(isPublisher || isSubscriber) && (
+              <button 
+                className={`nav-button ${currentView === 'auth' ? 'active' : ''}`}
+                onClick={() => setCurrentView('auth')}
+              >
+                Profile
+              </button>
+            )}
             {isPublisher && (
-              <>
-                <button 
-                  className={`nav-button ${currentView === 'auth' ? 'active' : ''}`}
-                  onClick={() => setCurrentView('auth')}
-                >
-                  Profile
-                </button>
-                <button 
-                  className={`nav-button ${currentView === 'publisher' ? 'active' : ''}`}
-                  onClick={() => setCurrentView('publisher')}
-                >
-                  Publisher
-                </button>
-              </>
+              <button 
+                className={`nav-button ${currentView === 'publisher' ? 'active' : ''}`}
+                onClick={() => setCurrentView('publisher')}
+              >
+                Publisher
+              </button>
+            )}
+            {isSubscriber && (
+              <button 
+                className={`nav-button ${currentView === 'subscriber' ? 'active' : ''}`}
+                onClick={() => setCurrentView('subscriber')}
+              >
+                Subscriber
+              </button>
             )}
             <button className="nav-button signout" onClick={handleSignOut}>
               Sign Out
@@ -76,8 +91,10 @@ const HomePage = (): React.JSX.Element => {
       <main className="main-content">
         {currentView === 'auth' ? (
           <AuthComponent />
-        ) : (
+        ) : currentView === 'publisher' ? (
           <PublisherComponent />
+        ) : (
+          <SubscriberComponent />
         )}
       </main>
     </div>

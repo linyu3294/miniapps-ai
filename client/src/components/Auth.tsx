@@ -28,6 +28,7 @@ const AuthComponent = (): React.JSX.Element => {
   const [isSignUp, setIsSignUp] = useState<boolean>(false);
   const [isConfirming, setIsConfirming] = useState<boolean>(false);
   const [isPublisher, setIsPublisher] = useState<boolean>(false);
+  const [isSubscriber, setIsSubscriber] = useState<boolean>(false);
   const [formData, setFormData] = useState<FormData>({
     email: '',
     password: '',
@@ -61,11 +62,17 @@ const AuthComponent = (): React.JSX.Element => {
           loginId: userAttributes.email
         }
       });
-      setIsPublisher(groups.includes('Publisher'));
+      if (groups.includes('Publisher')) {
+        setIsPublisher(true);
+      }  
+      if (groups.includes('Subscriber')) {
+        setIsSubscriber(true);
+      }
     } catch (error) {
       setIsAuthenticated(false);
       setUser(null);
       setIsPublisher(false);
+      setIsSubscriber(false);
       console.error(error);
     }
   };
@@ -217,7 +224,10 @@ const AuthComponent = (): React.JSX.Element => {
           <div className="user-info">
             <p><strong>User ID:</strong> {user.userId}</p>
             <p><strong>Email:</strong> {user.signInDetails?.loginId}</p>
-            <p><strong>Role:</strong> {isPublisher ? 'Publisher' : 'User'}</p>
+            {isPublisher && !isSubscriber && <p><strong>Role:</strong> {'Publisher'}</p>}
+            {isSubscriber && !isPublisher && <p><strong>Role:</strong> {'Subscriber'}</p>}
+            {isPublisher && isSubscriber && <p><strong>Role:</strong> {'Publisher and Subscriber'}</p>}
+            {!isPublisher && !isSubscriber && <p><strong>Role:</strong> {'Unauthenticated User'}</p>}
           </div>
           <button onClick={handleSignOut} className="auth-button signout">
             Sign Out
