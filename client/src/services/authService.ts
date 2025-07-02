@@ -1,4 +1,4 @@
-import { getCurrentUser, fetchUserAttributes, fetchAuthSession } from 'aws-amplify/auth';
+import { getCurrentUser, fetchUserAttributes, fetchAuthSession, signOut } from 'aws-amplify/auth';
 import { CognitoUser, getRolesFromGroups, Role } from '../types/auth';
 
 export interface AuthState {
@@ -33,8 +33,22 @@ export const checkAuthState = async (): Promise<AuthState> => {
       user,
       roles
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Auth state check failed:', error);
+  
+    if (error.name === 'UserUnauthenticatedException' || 
+        error.message?.includes('User needs to be authenticated') ||
+        error.message?.includes('Access Token has been revoked')) {
+      console.log('User tokens are invalid, clearing authentication state...');
+      try {
+        await signOut({ global: true });
+      } catch (signOutError) {
+        console.warn('Failed to sign out during cleanup:', signOutError);
+        localStorage.clear();
+        sessionStorage.clear();
+      }
+    }
+    
     return {
       isAuthenticated: false,
       user: undefined,
