@@ -1,5 +1,6 @@
 import React, { useState, useEffect, FormEvent, ChangeEvent, DragEvent } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { checkAuthState } from '../../services/authService';
 import JSZip from 'jszip';
 import './Publisher.css';
 
@@ -58,18 +59,14 @@ const PublisherComponent = (): React.JSX.Element => {
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
   useEffect(() => {
-    checkAuthState();
+    checkAuthentication();
   }, []);
 
-  const checkAuthState = async (): Promise<void> => {
+  const checkAuthentication = async (): Promise<void> => {
     try {
-      const session = await fetchAuthSession();
-      const accessToken = session.tokens?.accessToken.toString() || '';
-      const payload = accessToken ? JSON.parse(atob(accessToken.split('.')[1])) : {};
-      const groups = payload['cognito:groups'] || [];
-      
-      setIsAuthenticated(true);
-      setIsPublisher(groups.includes('Publisher'));
+      const authState = await checkAuthState();
+      setIsAuthenticated(authState.isAuthenticated);
+      setIsPublisher(authState.roles.includes('Publisher'));
     } catch (error) {
       setIsAuthenticated(false);
       setIsPublisher(false);

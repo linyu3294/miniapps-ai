@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { checkAuthState } from '../../services/authService';
 import './Subscriber.css';
 
 const SubscriberComponent = (): React.JSX.Element => {
@@ -7,18 +7,14 @@ const SubscriberComponent = (): React.JSX.Element => {
   const [isSubscriber, setIsSubscriber] = useState<boolean>(false);
 
   useEffect(() => {
-    checkAuthState();
+    checkAuthentication();
   }, []);
 
-  const checkAuthState = async (): Promise<void> => {
+  const checkAuthentication = async (): Promise<void> => {
     try {
-      const session = await fetchAuthSession();
-      const accessToken = session.tokens?.accessToken.toString() || '';
-      const payload = accessToken ? JSON.parse(atob(accessToken.split('.')[1])) : {};
-      const groups = payload['cognito:groups'] || [];
-      
-      setIsAuthenticated(true);
-      setIsSubscriber(groups.includes('Subscriber'));
+      const authState = await checkAuthState();
+      setIsAuthenticated(authState.isAuthenticated);
+      setIsSubscriber(authState.roles.includes('Subscriber'));
     } catch (error) {
       setIsAuthenticated(false);
       setIsSubscriber(false);
