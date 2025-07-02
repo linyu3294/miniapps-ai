@@ -1,6 +1,5 @@
-import React, { useState, useEffect, FormEvent, ChangeEvent, DragEvent } from 'react';
+import React, { useState, FormEvent, ChangeEvent, DragEvent } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { checkAuthState } from '../../services/authService';
 import JSZip from 'jszip';
 import './Publisher.css';
 
@@ -38,8 +37,6 @@ interface PublishResponse {
 }
 
 const PublisherComponent = (): React.JSX.Element => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isPublisher, setIsPublisher] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [message, setMessage] = useState<string>('');
@@ -54,61 +51,43 @@ const PublisherComponent = (): React.JSX.Element => {
   
   // File handling
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [manifestData, setManifestData] = useState<Manifest | null>(null);
+  const [manifestData, setManifestData] = useState<Manifest | undefined>(undefined);
   const [parsedFiles, setParsedFiles] = useState<FileInfo[]>([]);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
-  useEffect(() => {
-    checkAuthentication();
-  }, []);
-
-  const checkAuthentication = async (): Promise<void> => {
-    try {
-      const authState = await checkAuthState();
-      setIsAuthenticated(authState.isAuthenticated);
-      setIsPublisher(authState.roles.includes('Publisher'));
-    } catch (error) {
-      setIsAuthenticated(false);
-      setIsPublisher(false);
-      console.error('Auth check failed:', error);
+  const parseManifest = async (fileArray: File[]): Promise<Manifest | undefined> => {
+    let manifest: Manifest | undefined;
+    try{
+      const manifestText = await fileArray.find( 
+        file => file.name === 'manifest.json')?.text();
+      if (manifestText) {
+        manifest = JSON.parse(manifestText);
+        setManifestData(manifest);
+      }
+    } catch (err) {
+      setError('Failed to parse manifest.json');
     }
-  };
+    return manifest;
+  }
 
   const handleFileUpload = async (files: FileList | File[]): Promise<void> => {
     setError('');
     setMessage('');
-    
     const fileArray = Array.from(files);
-    setUploadedFiles(fileArray);
-    
-    // Parse files to extract metadata
     const fileInfos: FileInfo[] = [];
-    let manifest: Manifest | null = null;
-    
-    for (const file of fileArray) {
+    setUploadedFiles(fileArray);
+
+    fileArray.forEach(async (file) => {
       const fileInfo: FileInfo = {
         filename: file.name,
         size: file.size,
         type: file.type || getMimeType(file.name)
       };
       fileInfos.push(fileInfo);
-      
-      // Try to parse manifest.json
-      if (file.name === 'manifest.json') {
-        try {
-          const text = await file.text();
-          manifest = JSON.parse(text);
-          setManifestData(manifest);
-        } catch (err) {
-          setError('Failed to parse manifest.json');
-          return;
-        }
-      }
-    }
-    
+    });
     setParsedFiles(fileInfos);
-    
-    // Auto-set entrypoint if manifest has start_url
+
+    const manifest = await parseManifest(fileArray);
     if (manifest?.start_url && !entrypoint) {
       setEntrypoint(manifest.start_url);
     }
@@ -186,85 +165,72 @@ const PublisherComponent = (): React.JSX.Element => {
     return null;
   };
 
+
+  const validateAppSubmission = async () => {
+    if (!appSlug || !versionId || !versionNotes || !entrypoint || !publisherId) {
+      setError('All fields are required');
+      throw new Error(`Form validation failed: ${appSlug}, ${versionId}, ${versionNotes}, ${entrypoint}, ${publisherId}`);
+    }
+    const fileError = validateFiles();
+    if (fileError) {
+      setError(fileError);
+      throw new Error(fileError);
+    }
+    if (!manifestData) {
+      setError('Manifest data is required');
+      throw new Error('Manifest data is required');
+    }
+    const session = await fetchAuthSession();
+    const accessToken = session.tokens?.accessToken.toString(); 
+    if (!accessToken) {
+      setError('Authentication required');
+      throw new Error('Authentication required');
+    }
+  }
+
+  const getPresignedUrl = async (): Promise<void> => {
+    const requestBody: PublishRequest = {
+      manifest: manifestData!,
+      files: parsedFiles,
+      entrypoint,
+      version_notes: versionNotes,
+      publisher_id: publisherId
+    };
+    
+    const apiDomain = import.meta.env.VITE_API_GATEWAY_HTTPS_URL;
+    const apiUrl = `${apiDomain}/publish/${appSlug}/version/${versionId}`;
+    const session = await fetchAuthSession();
+    const accessToken = session.tokens?.accessToken.toString(); 
+    const response = await fetch(apiUrl,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(requestBody)
+      }
+    );
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    } 
+    const responseData: PublishResponse = await response.json();
+    setPresignedUrl(responseData.presigned_url);
+    setMessage('Files validated successfully! Use the presigned URL to upload your files.');
+  }
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     console.log('handleSubmit called');
     setError('');
     setMessage('');
     setIsLoading(true);
-    
-    // Validate form
-    if (!appSlug || !versionId || !versionNotes || !entrypoint || !publisherId) {
-      console.log('Form validation failed:', { appSlug, versionId, versionNotes, entrypoint, publisherId });
-      setError('All fields are required');
-      setIsLoading(false);
-      return;
-    }
-    
-    // Validate files
-    const fileError = validateFiles();
-    if (fileError) {
-      console.log('File validation failed:', fileError);
-      setError(fileError);
-      setIsLoading(false);
-      return;
-    }
-    
-    if (!manifestData) {
-      console.log('No manifest data');
-      setError('Manifest data is required');
-      setIsLoading(false);
-      return;
-    }
-    
+
+    await validateAppSubmission();
     try {
-      console.log('Getting auth session...');
-      // Get auth token
-      const session = await fetchAuthSession();
-      const accessToken = session.tokens?.accessToken.toString();
-      
-      if (!accessToken) {
-        console.log('No access token');
-        setError('Authentication required');
-        setIsLoading(false);
-        return;
-      }
-      
-      // Prepare request body
-      const requestBody: PublishRequest = {
-        manifest: manifestData,
-        files: parsedFiles,
-        entrypoint,
-        version_notes: versionNotes,
-        publisher_id: publisherId
-      };
-      
-      // Make API call
-      const apiDomain = import.meta.env.VITE_API_GATEWAY_HTTPS_URL;
-      const apiUrl = `${apiDomain}/publish/${appSlug}/version/${versionId}`;
-      console.log('Request URL:', `${apiUrl}`);
-      console.log('Request body:', requestBody);
-      
-      const response = await fetch(apiUrl,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
-          },
-          body: JSON.stringify(requestBody)
-        }
-      );
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const responseData: PublishResponse = await response.json();
-      setPresignedUrl(responseData.presigned_url);
-      setMessage('Files validated successfully! Use the presigned URL to upload your files.');
-      
+      await getPresignedUrl();
     } catch (err) {
       console.error('Error in handleSubmit:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -273,69 +239,52 @@ const PublisherComponent = (): React.JSX.Element => {
     }
   };
 
+  const createZipFromFiles = async (files: File[]): Promise<Blob> => {
+    const zip = new JSZip();
+    for (const file of files) {
+      zip.file(file.name, file);
+    }
+    return await zip.generateAsync({ type: 'blob' });
+  };
+
+  const uploadBlobToS3 = async (url: string, blob: Blob): Promise<void> => {
+    const uploadResponse = await fetch(url, {
+      method: 'PUT',
+      body: blob,
+      headers: {
+        'Content-Type': 'application/zip'
+      }
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+    }
+  };
+
   const handleUploadToS3 = async (): Promise<void> => {
     if (!presignedUrl || uploadedFiles.length === 0) {
       setError('No presigned URL or files available');
       return;
     }
-    
     setIsLoading(true);
     setError('');
-    
     try {
-      // Create a ZIP file from uploaded files
-      const zip = new JSZip();
-      
-      for (const file of uploadedFiles) {
-        zip.file(file.name, file);
-      }
-      
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-      
-      // Upload to S3 using presigned URL
-      const uploadResponse = await fetch(presignedUrl, {
-        method: 'PUT',
-        body: zipBlob,
-        headers: {
-          'Content-Type': 'application/zip'
-        }
-      });
-      
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
-      }
-      
+      setMessage('Creating ZIP file from uploaded files...');
+      const zipBlob = await createZipFromFiles(uploadedFiles);
+  
+      setMessage('Uploading files to S3...');
+      await uploadBlobToS3(presignedUrl, zipBlob);
+
       setMessage('Files uploaded successfully to S3!');
       setPresignedUrl('');
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      const errorMessage = err instanceof Error ? err.message : 'Upload failed';
+      setError(errorMessage);
+      console.error('S3 upload error:', err);
     } finally {
       setIsLoading(false);
     }
   };
-
-  if (!isAuthenticated) {
-    return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <h2>Authentication Required</h2>
-          <p>Please sign in to access the publisher functionality.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isPublisher) {
-    return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <h2>Access Denied</h2>
-          <p>You need Publisher permissions to access this functionality.</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="auth-container">
