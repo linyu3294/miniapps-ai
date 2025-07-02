@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+
 	"log"
 	"strings"
 
@@ -48,6 +49,7 @@ func parsePreferredRoles(rolesString string) []string {
 	if rolesString == "" {
 		log.Println("No preferred roles found, defaulting to Subscriber")
 		return []string{"Subscriber"}
+
 	}
 
 	roles := strings.Split(rolesString, ",")

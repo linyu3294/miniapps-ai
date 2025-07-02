@@ -28,8 +28,8 @@ const SubscriberComponent = (): React.JSX.Element => {
 
   if (!isAuthenticated || !isSubscriber) {
     return (
-      <div className="subscriber-container">
-        <div className="subscriber-card">
+      <div className="auth-container">
+        <div className="auth-card">
           <h2>Access Denied</h2>
           <p>You need to be authenticated and have subscriber permissions to access this page.</p>
         </div>
@@ -38,8 +38,8 @@ const SubscriberComponent = (): React.JSX.Element => {
   }
 
   return (
-    <div className="subscriber-container">
-      <div className="subscriber-card">
+    <div className="auth-container">
+      <div className="auth-card">
         <h2>Subscriber Dashboard</h2>
         <p>Welcome to the subscriber dashboard. Content coming soon...</p>
       </div>

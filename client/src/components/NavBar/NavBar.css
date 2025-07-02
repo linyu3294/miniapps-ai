@@ -1,10 +1,4 @@
-/* Home Page Component Styles */
-.home-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
+/* Nav Bar Component Styles */
 .nav-bar {
   background: #000;
   color: #fff;
@@ -51,21 +45,6 @@
 .nav-button.active {
   background: #fff;
   color: #000;
-}
-
-.nav-button.signout {
-  border-color: #ff4444;
-  color: #ff4444;
-}
-
-.nav-button.signout:hover {
-  background: #ff4444;
-  color: #fff;
-}
-
-.main-content {
-  flex: 1;
-  background: #fff;
 }
 
 /* Responsive Design */

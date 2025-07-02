@@ -193,7 +193,7 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
   }
 }
 
-// ----- TODO: Removepublisher lambda api gateway integration --------
+// ----- TODO: Remove publisher lambda api gateway integration --------
 
 resource "aws_apigatewayv2_integration" "publisher" {
   api_id           = aws_apigatewayv2_api.main.id
@@ -222,6 +222,7 @@ resource "aws_lambda_permission" "publisher_apigw" {
 }
 
 // ----- TODO: Remove publisher lambda api gateway integration --------
+
 
 
 
@@ -283,6 +284,8 @@ resource "aws_iam_role_policy" "user_cognito" {
         Action = [
           "cognito-idp:AdminAddUserToGroup",
           "cognito-idp:AdminRemoveUserFromGroup",
+          "cognito-idp:AdminListGroupsForUser",
+          "cognito-idp:AdminUpdateUserAttributes"
         ],
         Resource = aws_cognito_user_pool.main.arn
       }
@@ -298,6 +301,34 @@ resource "aws_lambda_permission" "user_cognito_trigger" {
   source_arn    = aws_cognito_user_pool.main.arn
 }
 
+# User role management API Gateway integration
+resource "aws_apigatewayv2_integration" "user" {
+  api_id           = aws_apigatewayv2_api.main.id
+  integration_type = "AWS_PROXY"
+  
+  integration_method = "POST"
+  integration_uri    = aws_lambda_function.user.invoke_arn
+  payload_format_version = "2.0"
+  
+  depends_on = [aws_lambda_function.user, aws_cognito_user_pool.main]
+}
+
+resource "aws_apigatewayv2_route" "user" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PUT /user-role"
+  target    = "integrations/${aws_apigatewayv2_integration.user.id}"
+
+  authorization_type = "JWT"
+  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_lambda_permission" "user_apigw" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.user.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+}
 
 # ---------------------------------------------
 # Publisher Lambda Function

@@ -1,37 +1,4 @@
-/* Publisher Component Styles */
-.publisher-container {
-  flex: 1;
-  min-height: 100vh;
-  padding: 20px;
-  background-color: #fff;
-}
-
-.publisher-card {
-  width: 100%;
-  max-width: 100%;
-  padding: 20px;
-}
-
-.publisher-card h2 {
-  font-size: 24px;
-  font-weight: 600;
-  color: #000;
-  margin-bottom: 32px;
-}
-
-.publisher-card h3 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #000;
-  margin-bottom: 16px;
-}
-
-.publisher-card h4 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #000;
-  margin-bottom: 12px;
-}
+/* Publisher Component - uses shared auth container/card styles */
 
 .form-row {
   display: flex;
@@ -231,54 +198,16 @@
   color: #666;
 }
 
-/* Error and Message Styles */
-.error {
-  background: #fee;
-  color: #c00;
-  padding: 12px;
-  border-radius: 8px;
-  margin: 20px 0;
-  font-size: 14px;
-  border: 1px solid #fcc;
-}
+/* Error and message styles inherited from Auth.css */
 
-.message {
-  background: #efe;
-  color: #0a0;
-  padding: 12px;
-  border-radius: 8px;
-  margin: 20px 0;
-  font-size: 14px;
-  border: 1px solid #cfc;
-}
-
-/* Responsive Design */
+/* Responsive form adjustments */
 @media (min-width: 768px) {
-  .publisher-container {
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 40px;
-  }
-
-  .publisher-card {
-    max-width: 800px;
-  }
-  
   .form-row {
     flex-direction: row;
   }
 }
 
 @media (max-width: 767px) {
-  .publisher-container {
-    padding: 20px;
-  }
-  
-  .publisher-card {
-    padding: 16px;
-  }
-  
   .form-row {
     flex-direction: column;
     gap: 0;
@@ -297,7 +226,7 @@
   }
 }
 
-/* Loading States */
+/* Loading animation for publisher button */
 .publisher-button:disabled {
   position: relative;
 }

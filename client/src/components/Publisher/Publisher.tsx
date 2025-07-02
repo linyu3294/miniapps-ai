@@ -320,8 +320,8 @@ const PublisherComponent = (): React.JSX.Element => {
 
   if (!isAuthenticated) {
     return (
-      <div className="publisher-container">
-        <div className="publisher-card">
+      <div className="auth-container">
+        <div className="auth-card">
           <h2>Authentication Required</h2>
           <p>Please sign in to access the publisher functionality.</p>
         </div>
@@ -331,8 +331,8 @@ const PublisherComponent = (): React.JSX.Element => {
 
   if (!isPublisher) {
     return (
-      <div className="publisher-container">
-        <div className="publisher-card">
+      <div className="auth-container">
+        <div className="auth-card">
           <h2>Access Denied</h2>
           <p>You need Publisher permissions to access this functionality.</p>
         </div>
@@ -341,8 +341,8 @@ const PublisherComponent = (): React.JSX.Element => {
   }
 
   return (
-    <div className="publisher-container">
-      <div className="publisher-card">
+    <div className="auth-container">
+      <div className="auth-card">
         <h2>Publish Your App</h2>
         
         {error && <p className="error">{error}</p>}
