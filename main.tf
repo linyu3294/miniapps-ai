@@ -131,6 +131,10 @@ resource "aws_cognito_user_pool" "main" {
     }
   }
 
+  lambda_config {
+    post_confirmation = aws_lambda_function.user.arn
+  }
+
   tags = local.tags
 }
 
@@ -284,6 +288,14 @@ resource "aws_iam_role_policy" "user_cognito" {
       }
     ]
   })
+}
+
+resource "aws_lambda_permission" "user_cognito_trigger" {
+  statement_id  = "AllowCognitoPostConfirmation"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.user.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
 }
 
 

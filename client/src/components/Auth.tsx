@@ -2,11 +2,15 @@ import React, { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { signUp, signIn, signOut, confirmSignUp, resendSignUpCode, getCurrentUser, fetchUserAttributes, fetchAuthSession } from 'aws-amplify/auth';
 import './Auth.css';
 
+
+type Role = ['Subscriber'] | ['Publisher'] | ['Subscriber', 'Publisher'];
+
 interface FormData {
   email: string;
   password: string;
   confirmPassword: string;
   confirmationCode: string;
+  selectedRoles: Role;
 }
 
 interface CognitoUser {
@@ -28,7 +32,8 @@ const AuthComponent = (): React.JSX.Element => {
     email: '',
     password: '',
     confirmPassword: '',
-    confirmationCode: ''
+    confirmationCode: '',
+    selectedRoles: ['Subscriber'] // Default to Subscriber
   });
   const [error, setError] = useState<string>('');
   const [message, setMessage] = useState<string>('');
@@ -79,6 +84,35 @@ const AuthComponent = (): React.JSX.Element => {
     setError('');
   };
 
+  const handleRoleChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    const { value, checked } = e.target;
+    const role = value as 'Subscriber' | 'Publisher';
+    
+    setFormData(prev => {
+      let newRoles = [...prev.selectedRoles];
+      
+      if (checked) {
+        if (!newRoles.includes(role)) {
+          newRoles.push(role);
+        }
+      } else {
+        newRoles = newRoles.filter(r => r !== role);
+        // Ensure at least one role remains selected
+        if (newRoles.length === 0) {
+          newRoles = ['Subscriber'];
+        }
+      }
+      
+      // Sort to match Role type expectations
+      newRoles.sort();
+      
+      return {
+        ...prev,
+        selectedRoles: newRoles as Role
+      };
+    });
+  };
+
   const handleSignUp = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     setError('');
@@ -100,7 +134,8 @@ const AuthComponent = (): React.JSX.Element => {
         password: formData.password,
         options: {
           userAttributes: {
-            email: formData.email
+            email: formData.email,
+            'custom:preferred_roles': formData.selectedRoles.join(',')
           }
         }
       });
@@ -126,7 +161,7 @@ const AuthComponent = (): React.JSX.Element => {
       setMessage('Email verified successfully! You can now sign in.');
       setIsConfirming(false);
       setIsSignUp(false);
-      setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '' });
+      setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '', selectedRoles: ['Subscriber'] });
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An error occurred');
     }
@@ -145,7 +180,7 @@ const AuthComponent = (): React.JSX.Element => {
       setIsAuthenticated(true);
       setUser(signInResult as unknown as CognitoUser);
       setMessage('Signed in successfully!');
-      setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '' });
+      setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '', selectedRoles: ['Subscriber'] });
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An error occurred');
     }
@@ -256,16 +291,41 @@ const AuthComponent = (): React.JSX.Element => {
               />
             </div>
             {isSignUp && (
-              <div className="form-group">
-                <input
-                  type="password"
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  placeholder="Confirm your password"
-                  required
-                />
-              </div>
+              <>
+                <div className="form-group">
+                  <input
+                    type="password"
+                    name="confirmPassword"
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    placeholder="Confirm your password"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Select your role(s):</label>
+                  <div className="role-selection">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        value="Subscriber"
+                        checked={(formData.selectedRoles as string[]).includes('Subscriber')}
+                        onChange={handleRoleChange}
+                      />
+                      Subscriber - Browse and install apps
+                    </label>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        value="Publisher"
+                        checked={(formData.selectedRoles as string[]).includes('Publisher')}
+                        onChange={handleRoleChange}
+                      />
+                      Publisher - Upload and publish apps
+                    </label>
+                  </div>
+                </div>
+              </>
             )}
             <button type="submit" className="auth-button">
               {isSignUp ? 'Sign Up' : 'Sign In'}
@@ -276,7 +336,7 @@ const AuthComponent = (): React.JSX.Element => {
                 setIsSignUp(!isSignUp);
                 setError('');
                 setMessage('');
-                setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '' });
+                setFormData({ email: '', password: '', confirmPassword: '', confirmationCode: '', selectedRoles: ['Subscriber'] });
               }} 
               className="auth-button secondary"
             >
