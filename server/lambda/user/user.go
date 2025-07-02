@@ -34,22 +34,17 @@ func addUserToGroup(userPoolId, username, groupName string) error {
 		Username:   aws.String(username),
 		GroupName:  aws.String(groupName),
 	}
-
 	_, err := cognitoClient.AdminAddUserToGroup(input)
 	if err != nil {
-		log.Printf("Error adding user %s to group %s: %v", username, groupName, err)
 		return err
 	}
-
-	log.Printf("Successfully added user %s to group %s", username, groupName)
 	return nil
 }
 
-func parsePreferredRoles(rolesString string) []string {
+func parseCustomRoles(rolesString string) []string {
 	if rolesString == "" {
 		log.Println("No preferred roles found, defaulting to Subscriber")
 		return []string{"Subscriber"}
-
 	}
 
 	roles := strings.Split(rolesString, ",")
@@ -61,12 +56,10 @@ func parsePreferredRoles(rolesString string) []string {
 			cleanRoles = append(cleanRoles, role)
 		}
 	}
-
 	if len(cleanRoles) == 0 {
 		log.Println("No valid roles found, defaulting to Subscriber")
 		return []string{"Subscriber"}
 	}
-
 	return cleanRoles
 }
 
@@ -74,33 +67,31 @@ func parsePreferredRoles(rolesString string) []string {
 // Main handler function
 /*****************************************************/
 
-func handlePostConfirmation(ctx context.Context, event events.CognitoEventUserPoolsPostConfirmation) (events.CognitoEventUserPoolsPostConfirmation, error) {
-	log.Printf("Processing Post Confirmation for user: %s", event.UserName)
-
-	// Extract preferred roles from user attributes
-	preferredRoles := ""
+func handlePostConfirmation(
+	ctx context.Context,
+	event events.CognitoEventUserPoolsPostConfirmation,
+) (events.CognitoEventUserPoolsPostConfirmation, error) {
+	var roles = []string{}
 	if customRoles, exists := event.Request.UserAttributes["custom:preferred_roles"]; exists {
-		preferredRoles = customRoles
+		roles = parseCustomRoles(customRoles)
+	} else {
+		roles = []string{"Subscriber"}
+		log.Println("No preferred roles found, defaulting to Subscriber for user: ", event.UserName)
 	}
 
-	log.Printf("User %s preferred roles: %s", event.UserName, preferredRoles)
-
-	// Parse the roles
-	roles := parsePreferredRoles(preferredRoles)
-
-	// Add user to each selected group
 	userPoolId := event.UserPoolID
 	for _, role := range roles {
 		err := addUserToGroup(userPoolId, event.UserName, role)
 		if err != nil {
-			log.Printf("Failed to add user %s to group %s: %v", event.UserName, role, err)
-			// Continue with other roles even if one fails
+			log.Printf(
+				"Failed to add user %s to group %s: %v",
+				event.UserName,
+				role,
+				err,
+			)
+			continue
 		}
 	}
-
-	log.Printf("Post Confirmation processing completed for user: %s", event.UserName)
-
-	// Return the event unchanged (required for Cognito triggers)
 	return event, nil
 }
 
