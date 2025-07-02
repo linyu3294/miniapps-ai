@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-
+	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 
@@ -14,8 +15,20 @@ import (
 )
 
 /*****************************************************/
-// AWS Services
+// Define types, variables and constants
 /*****************************************************/
+type UpdateRoleRequest struct {
+	NewRole []string `json:"newRole"`
+}
+
+const (
+	contentTypeHeader = "Content-Type"
+	jsonContentType   = "application/json"
+)
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
 
 var cognitoClient *cognitoidentityprovider.CognitoIdentityProvider
 
@@ -63,12 +76,85 @@ func parseCustomRoles(rolesString string) []string {
 	return cleanRoles
 }
 
+func getUserFromJWT(event events.APIGatewayV2HTTPRequest) (string, error) {
+	claims := event.RequestContext.Authorizer.JWT.Claims
+
+	// Try username (most reliable for Cognito access tokens)
+	if username, ok := claims["username"]; ok && username != "" {
+		return username, nil
+	}
+	// Fallback to sub (unique user ID)
+	if sub, ok := claims["sub"]; ok && sub != "" {
+		return sub, nil
+	}
+
+	return "", fmt.Errorf("no valid username found in JWT claims: %+v", claims)
+}
+
+func getCurrentUserGroups(userPoolId, username string) ([]string, error) {
+	input := &cognitoidentityprovider.AdminListGroupsForUserInput{
+		UserPoolId: aws.String(userPoolId),
+		Username:   aws.String(username),
+	}
+
+	result, err := cognitoClient.AdminListGroupsForUser(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var groups []string
+	for _, group := range result.Groups {
+		if group.GroupName != nil {
+			groups = append(groups, *group.GroupName)
+		}
+	}
+	return groups, nil
+}
+
+func removeUserFromGroups(userPoolId, username string, groups []string) error {
+	for _, group := range groups {
+		input := &cognitoidentityprovider.AdminRemoveUserFromGroupInput{
+			UserPoolId: aws.String(userPoolId),
+			Username:   aws.String(username),
+			GroupName:  aws.String(group),
+		}
+		_, err := cognitoClient.AdminRemoveUserFromGroup(input)
+		if err != nil {
+			log.Printf("Failed to remove user %s from group %s: %v", username, group, err)
+			return err
+		}
+	}
+	return nil
+}
+
+/*****************************************************/
+// Response functions
+/*****************************************************/
+
+func createErrorResponse(statusCode int, message string) (events.APIGatewayV2HTTPResponse, error) {
+	errorResp := ErrorResponse{Error: message}
+	body, _ := json.Marshal(errorResp)
+	return events.APIGatewayV2HTTPResponse{
+		StatusCode: statusCode,
+		Headers:    map[string]string{contentTypeHeader: jsonContentType},
+		Body:       string(body),
+	}, nil
+}
+
+func createSuccessResponse(statusCode int, data interface{}) events.APIGatewayV2HTTPResponse {
+	body, _ := json.Marshal(data)
+	return events.APIGatewayV2HTTPResponse{
+		StatusCode: statusCode,
+		Headers:    map[string]string{contentTypeHeader: jsonContentType},
+		Body:       string(body),
+	}
+}
+
 /*****************************************************/
 // Main handler function
 /*****************************************************/
 
 func handlePostConfirmation(
-	ctx context.Context,
 	event events.CognitoEventUserPoolsPostConfirmation,
 ) (events.CognitoEventUserPoolsPostConfirmation, error) {
 	var roles = []string{}
@@ -95,10 +181,91 @@ func handlePostConfirmation(
 	return event, nil
 }
 
+func handleAPIGateway(
+	event events.APIGatewayV2HTTPRequest,
+) (events.APIGatewayV2HTTPResponse, error) {
+
+	var request UpdateRoleRequest
+	if err := json.Unmarshal([]byte(event.Body), &request); err != nil {
+		return createErrorResponse(400, "Invalid request body")
+	}
+	email, err := getUserFromJWT(event)
+	if err != nil {
+		return createErrorResponse(500, "Unable to determine user")
+	}
+	// Get user pool ID from environment or use the one from Cognito config
+	// For now, we'll extract from JWT issuer
+	userPoolId := event.RequestContext.Authorizer.JWT.Claims["iss"]
+	if userPoolId == "" {
+		return createErrorResponse(500, "Unable to determine user pool")
+	}
+	// Extract user pool ID from issuer URL (format: https://cognito-idp.region.amazonaws.com/userPoolId)
+	parts := strings.Split(userPoolId, "/")
+	if len(parts) < 2 {
+		return createErrorResponse(500, "Unable to determine user pool")
+	}
+	userPoolId = parts[len(parts)-1]
+
+	currentGroups, err := getCurrentUserGroups(userPoolId, email)
+	if err != nil {
+		log.Printf("Failed to get current groups for user %s: %v", email, err)
+		return createErrorResponse(500, "Failed to get current groups")
+	}
+	if err := removeUserFromGroups(userPoolId, email, currentGroups); err != nil {
+		return createErrorResponse(500, "Failed to remove user from groups")
+	}
+
+	// Add user to new groups
+	for _, role := range request.NewRole {
+		// Capitalize first letter to match Cognito group names
+		role = strings.ToLower(role)
+		if len(role) > 0 {
+			role = strings.ToUpper(role[:1]) + role[1:]
+		}
+		if role == "Subscriber" || role == "Publisher" {
+			if err := addUserToGroup(userPoolId, email, role); err != nil {
+				log.Printf("Failed to add user %s to group %s: %v", email, role, err)
+				return createErrorResponse(500, "Failed to add user to group")
+			}
+		}
+	}
+	return createSuccessResponse(200, "User roles updated successfully"), nil
+}
+
 /*****************************************************/
 // Lambda entry point
 /*****************************************************/
 
+func handleRequest(ctx context.Context, event json.RawMessage) (interface{}, error) {
+	var eventMap map[string]interface{}
+	if err := json.Unmarshal(event, &eventMap); err != nil {
+		return nil, fmt.Errorf("failed to parse event: %w", err)
+	}
+
+	if requestContext, ok := eventMap["requestContext"].(map[string]interface{}); ok {
+		if _, hasHTTP := requestContext["http"]; hasHTTP {
+			var apiEvent events.APIGatewayV2HTTPRequest
+			if err := json.Unmarshal(event, &apiEvent); err != nil {
+				return nil, fmt.Errorf("failed to parse API Gateway event: %w", err)
+			}
+			return handleAPIGateway(apiEvent)
+		}
+	}
+
+	if _, ok := eventMap["triggerSource"]; ok {
+		if userPoolID, hasUserPool := eventMap["userPoolId"]; hasUserPool && userPoolID != nil {
+			var cognitoEvent events.CognitoEventUserPoolsPostConfirmation
+			if err := json.Unmarshal(event, &cognitoEvent); err != nil {
+				return nil, fmt.Errorf("failed to parse Cognito event: %w", err)
+			}
+			return handlePostConfirmation(cognitoEvent)
+		}
+	}
+
+	log.Printf("Unsupported event structure: %+v", eventMap)
+	return nil, fmt.Errorf("unsupported event type")
+}
+
 func main() {
-	lambda.Start(handlePostConfirmation)
+	lambda.Start(handleRequest)
 }

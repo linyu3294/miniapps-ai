@@ -1,4 +1,4 @@
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { fetchAuthSession, fetchUserAttributes } from 'aws-amplify/auth';
 import { Role } from '../types/auth';
 
 export const updateUserRoles = async (roles: Role): Promise<void> => {
@@ -26,6 +26,13 @@ export const updateUserRoles = async (roles: Role): Promise<void> => {
   });
 
   if (response.status === 200) {
+    // Force token refresh to get updated roles
+    try {
+      await fetchAuthSession({ forceRefresh: true });
+      await fetchUserAttributes(); // Refresh user attributes too
+    } catch (refreshError) {
+      console.warn('Failed to refresh tokens after role update:', refreshError);
+    }
     return; // Success
   } else if (response.status === 401) {
     throw new Error('Authentication failed. Please sign in again.');

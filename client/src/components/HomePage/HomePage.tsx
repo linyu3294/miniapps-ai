@@ -88,6 +88,7 @@ const HomePage = (): React.JSX.Element => {
               currentRoles={currentRoles}
               onSignOut={handleSignOut}
               onRolesUpdated={handleRolesUpdated}
+              onAuthRefresh={checkAuthentication}
             />
           ) : (
             <Auth />

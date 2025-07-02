@@ -10,13 +10,15 @@ interface UserDashboardProps {
   currentRoles: Role;
   onSignOut: () => void;
   onRolesUpdated: (newRoles: Role) => void;
+  onAuthRefresh?: () => void;
 }
 
 const UserDashboard: React.FC<UserDashboardProps> = ({ 
   user, 
   currentRoles, 
   onSignOut, 
-  onRolesUpdated 
+  onRolesUpdated,
+  onAuthRefresh
 }) => {
   const [isUpdatingRoles, setIsUpdatingRoles] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
@@ -29,8 +31,15 @@ const UserDashboard: React.FC<UserDashboardProps> = ({
 
     try {
       await updateUserRoles(roles);
-      setMessage('Roles updated successfully! Please refresh the page to see changes.');
+      setMessage('Roles updated successfully! Changes will take effect immediately.');
       onRolesUpdated(roles);
+      
+      // Refresh parent auth state after token refresh
+      if (onAuthRefresh) {
+        setTimeout(() => {
+          onAuthRefresh();
+        }, 1000);
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to update roles');
     } finally {
