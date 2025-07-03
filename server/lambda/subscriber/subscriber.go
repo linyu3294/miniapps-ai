@@ -89,18 +89,29 @@ func validateSubscriber(request events.APIGatewayV2HTTPRequest) (events.APIGatew
 	trimmedGroups := groupsClaim[1 : len(groupsClaim)-1]
 	var groupsList []string
 	if trimmedGroups != "" {
-		groupsList = strings.Split(trimmedGroups, ", ")
+		// Handle both comma-separated and space-separated formats
+		if strings.Contains(trimmedGroups, ", ") {
+			groupsList = strings.Split(trimmedGroups, ", ")
+		} else {
+			groupsList = strings.Fields(trimmedGroups) // Split by any whitespace
+		}
 	} else {
 		groupsList = []string{}
 	}
 
+	log.Printf("Raw groups claim: %s", groupsClaim)
+	log.Printf("Trimmed groups: %s", trimmedGroups)
+	log.Printf("Parsed groups list: %v", groupsList)
+
 	isSubscriber := false
 	for _, group := range groupsList {
+		log.Printf("Checking group: '%s'", group)
 		if group == "Subscriber" || group == "Publisher" {
 			isSubscriber = true
 			break
 		}
 	}
+	log.Printf("isSubscriber result: %t", isSubscriber)
 	if !isSubscriber {
 		return createErrorResponse(403, "Access denied. Subscriber role required.")
 	}

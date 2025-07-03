@@ -271,7 +271,10 @@ resource "aws_iam_role_policy" "user_lambda_invoke" {
       {
         Effect = "Allow",
         Action = "lambda:InvokeFunction",
-        Resource = aws_lambda_function.publisher.arn
+        Resource = [
+          aws_lambda_function.publisher.arn,
+          aws_lambda_function.subscriber.arn
+        ]
       }
     ]
   })
@@ -309,6 +312,15 @@ resource "aws_apigatewayv2_route" "put_user_role" {
 resource "aws_apigatewayv2_route" "user_publish" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /publish/{app-slug}/version/{version-id}"
+  target    = "integrations/${aws_apigatewayv2_integration.user.id}"
+
+  authorization_type = "JWT"
+  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_apigatewayv2_route" "user_get_all_apps" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /apps"
   target    = "integrations/${aws_apigatewayv2_integration.user.id}"
 
   authorization_type = "JWT"
@@ -496,31 +508,6 @@ resource "aws_iam_role_policy" "subscriber_dynamodb_policy" {
       },
     ]
   })
-}
-
-# API Gateway integration for Subscriber Lambda
-resource "aws_apigatewayv2_integration" "subscriber" {
-  api_id             = aws_apigatewayv2_api.main.id
-  integration_type   = "AWS_PROXY"
-  integration_method = "POST"
-  integration_uri    = aws_lambda_function.subscriber.invoke_arn
-}
-
-# API Gateway routes for Subscriber Lambda
-resource "aws_apigatewayv2_route" "get_apps" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /apps"
-  target    = "integrations/${aws_apigatewayv2_integration.subscriber.id}"
-  authorization_type = "JWT"
-  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
-}
-
-resource "aws_lambda_permission" "subscriber_apigw" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.subscriber.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }
 
 # ---------------------------------------------
