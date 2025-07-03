@@ -227,6 +227,7 @@ resource "aws_lambda_function" "user" {
 
   environment {
     variables = {
+      SUBSCRIBER_FUNCTION_NAME = aws_lambda_function.subscriber.function_name
       PUBLISHER_FUNCTION_NAME = aws_lambda_function.publisher.function_name
     }
   }

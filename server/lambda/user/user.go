@@ -36,6 +36,7 @@ type ErrorResponse struct {
 var cognitoClient *cognitoidentityprovider.CognitoIdentityProvider
 var lambdaClient *awslambda.Lambda
 var publishRouteRegex *regexp.Regexp
+var subscriberRouteRegex *regexp.Regexp
 
 func init() {
 	sess := session.Must(session.NewSession())
@@ -44,6 +45,7 @@ func init() {
 
 	// Compile regex for publish route: publish/{app-slug}/version/{version-id}
 	publishRouteRegex = regexp.MustCompile(`publish/[^/]+/version/[^/]+`)
+	subscriberRouteRegex = regexp.MustCompile(`apps`)
 }
 
 /*****************************************************/
@@ -190,30 +192,36 @@ func handlePostConfirmation(
 	return event, nil
 }
 
-func relayToPublisherLambda(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	publisherFunctionName := os.Getenv("PUBLISHER_FUNCTION_NAME")
-
+// Generic function to relay requests to any lambda function
+func relayToLambda(event events.APIGatewayV2HTTPRequest, functionName, lambdaType string) (events.APIGatewayV2HTTPResponse, error) {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return createErrorResponse(500, "Failed to marshal event")
 	}
-
 	result, err := lambdaClient.Invoke(&awslambda.InvokeInput{
-		FunctionName: aws.String(publisherFunctionName),
+		FunctionName: aws.String(functionName),
 		Payload:      eventJSON,
 	})
 	if err != nil {
-		log.Printf("Failed to invoke publisher lambda: %v", err)
-		return createErrorResponse(500, "Failed to process publish request")
+		log.Printf("Failed to invoke %s lambda: %v", lambdaType, err)
+		return createErrorResponse(500, fmt.Sprintf("Failed to process %s request", lambdaType))
 	}
-
 	var response events.APIGatewayV2HTTPResponse
 	if err := json.Unmarshal(result.Payload, &response); err != nil {
-		log.Printf("Failed to unmarshal publisher response: %v", err)
-		return createErrorResponse(500, "Invalid response from publisher")
+		log.Printf("Failed to unmarshal %s response: %v", lambdaType, err)
+		return createErrorResponse(500, fmt.Sprintf("Invalid response from %s", lambdaType))
 	}
-
 	return response, nil
+}
+
+func relayToPublisherLambda(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	publisherFunctionName := os.Getenv("PUBLISHER_FUNCTION_NAME")
+	return relayToLambda(event, publisherFunctionName, "publisher")
+}
+
+func relayToSubscriberLambda(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	subscriberFunctionName := os.Getenv("SUBSCRIBER_FUNCTION_NAME")
+	return relayToLambda(event, subscriberFunctionName, "subscriber")
 }
 
 func handleAPIGateway(
@@ -228,6 +236,11 @@ func handleAPIGateway(
 	if event.RequestContext.HTTP.Method == "POST" && publishRouteRegex.MatchString(event.RawPath) {
 		log.Printf("Routing to publisher lambda (matched regex pattern)")
 		return relayToPublisherLambda(event)
+	}
+
+	if event.RequestContext.HTTP.Method == "GET" && subscriberRouteRegex.MatchString(event.RawPath) {
+		log.Printf("Routing to subscriber lambda (matched regex pattern)")
+		return relayToSubscriberLambda(event)
 	}
 
 	// Handle user role management (PUT /user-role)
