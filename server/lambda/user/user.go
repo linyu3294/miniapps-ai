@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -34,11 +35,15 @@ type ErrorResponse struct {
 
 var cognitoClient *cognitoidentityprovider.CognitoIdentityProvider
 var lambdaClient *awslambda.Lambda
+var publishRouteRegex *regexp.Regexp
 
 func init() {
 	sess := session.Must(session.NewSession())
 	cognitoClient = cognitoidentityprovider.New(sess)
 	lambdaClient = awslambda.New(sess)
+
+	// Compile regex for publish route: publish/{app-slug}/version/{version-id}
+	publishRouteRegex = regexp.MustCompile(`publish/[^/]+/version/[^/]+`)
 }
 
 /*****************************************************/
@@ -215,18 +220,25 @@ func handleAPIGateway(
 	event events.APIGatewayV2HTTPRequest,
 ) (events.APIGatewayV2HTTPResponse, error) {
 
-	// Check if this is a publish request
-	if event.RequestContext.HTTP.Method == "POST" &&
-		strings.HasPrefix(event.RawPath, "/publish/") {
+	// Debug logging
+	log.Printf("Received request - Method: %s, RawPath: %s, Path: %s",
+		event.RequestContext.HTTP.Method, event.RawPath, event.RequestContext.HTTP.Path)
+
+	// Check if this is a publish request using regex
+	if event.RequestContext.HTTP.Method == "POST" && publishRouteRegex.MatchString(event.RawPath) {
+		log.Printf("Routing to publisher lambda (matched regex pattern)")
 		return relayToPublisherLambda(event)
 	}
 
 	// Handle user role management (PUT /user-role)
 	if event.RequestContext.HTTP.Method == "PUT" &&
-		event.RawPath == "/user-role" {
+		(event.RawPath == "/user-role" || strings.HasSuffix(event.RawPath, "/user-role")) {
+		log.Printf("Routing to user role update")
 		return handleUserRoleUpdate(event)
 	}
 
+	log.Printf("No matching route found for Method: %s, RawPath: %s",
+		event.RequestContext.HTTP.Method, event.RawPath)
 	return createErrorResponse(404, "Endpoint not found")
 }
 
