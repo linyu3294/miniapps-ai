@@ -434,6 +434,95 @@ resource "aws_lambda_event_source_mapping" "publisher_sqs_trigger" {
 }
 
 # ---------------------------------------------
+# Subscriber Lambda
+# ---------------------------------------------
+resource "aws_iam_role" "subscriber_exec" {
+  name = "${var.project_name}-${var.environment}-lambda-subscriber-exec-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow",
+      Action    = "sts:AssumeRole",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_lambda_function" "subscriber" {
+  filename         = "server/lambda/subscriber/subscriber.zip"
+  source_code_hash = filebase64sha256("server/lambda/subscriber/subscriber.zip")
+  function_name    = "${var.project_name}-subscriber-${var.environment}"
+  role            = aws_iam_role.subscriber_exec.arn
+  handler         = "subscriber"
+  runtime         = "provided.al2"
+  architectures   = ["x86_64"]
+  depends_on = [aws_dynamodb_table.app_table]
+
+  environment {
+    variables = {
+      app_table_name = aws_dynamodb_table.app_table.name
+    }
+  }
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "subscriber_basic_policy" {
+  role       = aws_iam_role.subscriber_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "subscriber_dynamodb_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-subscriber-dynamodb-policy"
+  role = aws_iam_role.subscriber_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "dynamodb:Scan",
+          "dynamodb:GetItem",
+          "dynamodb:Query"
+        ],
+        Resource = [
+          aws_dynamodb_table.app_table.arn,
+          "${aws_dynamodb_table.app_table.arn}/index/*"
+        ]
+      },
+    ]
+  })
+}
+
+# API Gateway integration for Subscriber Lambda
+resource "aws_apigatewayv2_integration" "subscriber" {
+  api_id             = aws_apigatewayv2_api.main.id
+  integration_type   = "AWS_PROXY"
+  integration_method = "POST"
+  integration_uri    = aws_lambda_function.subscriber.invoke_arn
+}
+
+# API Gateway routes for Subscriber Lambda
+resource "aws_apigatewayv2_route" "get_apps" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /apps"
+  target    = "integrations/${aws_apigatewayv2_integration.subscriber.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_lambda_permission" "subscriber_apigw" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.subscriber.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+}
+
+# ---------------------------------------------
 # App MetaData SQS Queue
 # ---------------------------------------------
 
