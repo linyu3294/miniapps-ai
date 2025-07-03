@@ -3,12 +3,20 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import './Subscriber.css';
 
 interface App {
-  id: string;
-  name: string;
-  description?: string;
-  version?: string;
-  publisher?: string;
-  // Add other app properties as needed
+  appId: string;
+  appSlug: string;
+  appName: string;
+  appDescription: string;
+  publisherId: string;
+  uploadTimestamp: string;
+  versionNumber: number;
+  manifestContent?: string;
+}
+
+interface AppListResponse {
+  apps: App[];
+  count: number;
+  nextCursor?: string;
 }
 
 type TabType = 'home' | 'store';
@@ -18,14 +26,19 @@ const SubscriberComponent = (): React.JSX.Element => {
   const [apps, setApps] = useState<App[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [prevCursors, setPrevCursors] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+      const limit = 1;
 
   useEffect(() => {
     if (activeTab === 'home') {
-      fetchApps();
+      fetchApps(cursor);
     }
-  }, [activeTab]);
+  }, [activeTab, cursor]);
 
-  const fetchApps = async (): Promise<void> => {
+  const fetchApps = async (cursorParam: string | null): Promise<void> => {
     setIsLoading(true);
     setError('');
 
@@ -42,7 +55,14 @@ const SubscriberComponent = (): React.JSX.Element => {
         throw new Error('API Gateway URL not configured');
       }
 
-      const response = await fetch(`${apiDomain}/apps`, {
+      let url = `${apiDomain}/apps?limit=${limit}`;
+      if (cursorParam) {
+        url += `&cursor=${encodeURIComponent(cursorParam)}`;
+      }
+
+      console.log('Request URL:', url);
+
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -51,8 +71,9 @@ const SubscriberComponent = (): React.JSX.Element => {
       });
 
       if (response.status === 200) {
-        const data = await response.json();
-        setApps(data.apps || data || []); // Handle different response structures
+        const data: AppListResponse = await response.json();
+        setApps(data.apps || []);
+        setNextCursor(data.nextCursor || null);
       } else if (response.status === 401) {
         throw new Error('Authentication failed. Please sign in again.');
       } else if (response.status === 403) {
@@ -70,31 +91,76 @@ const SubscriberComponent = (): React.JSX.Element => {
     }
   };
 
+  const handleNext = () => {
+    if (nextCursor) {
+      setPrevCursors(prev => [...prev, cursor || '']);
+      setCursor(nextCursor);
+      setPage(p => p + 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (prevCursors.length > 0) {
+      const prev = [...prevCursors];
+      const prevCursor = prev.pop() || null;
+      setPrevCursors(prev);
+      setCursor(prevCursor);
+      setPage(p => p - 1);
+    }
+  };
+
   const renderHomeTab = (): React.JSX.Element => (
     <div className="tab-content">
       <h3>Available Apps</h3>
       {isLoading ? (
-        <p>Loading apps...</p>
+        <div className="loading-container">
+          <p>Loading apps...</p>
+        </div>
       ) : error ? (
         <div className="error-container">
           <p className="error">{error}</p>
-          <button onClick={fetchApps} className="retry-button">
+          <button onClick={() => fetchApps(cursor)} className="retry-button">
             Retry
           </button>
         </div>
       ) : apps.length > 0 ? (
-        <div className="apps-grid">
-          {apps.map((app) => (
-            <div key={app.id} className="app-card">
-              <h4>{app.name}</h4>
-              {app.description && <p>{app.description}</p>}
-              {app.version && <span className="app-version">v{app.version}</span>}
-              {app.publisher && <span className="app-publisher">by {app.publisher}</span>}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="cards-grid">
+            {apps.map((app) => (
+              <div key={app.appId} className="app-card">
+                <div className="app-card-content">
+                  <h4>{app.appName}</h4>
+                  {app.appDescription && <p>{app.appDescription}</p>}
+                  <div className="app-meta">
+                    <span className="app-version">v{app.versionNumber}</span>
+                    <span className="app-publisher">by {app.publisherId}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="pagination">
+            <button 
+              className="pagination-link" 
+              onClick={handlePrev} 
+              disabled={page === 1 || isLoading}
+            >
+              &lt;&lt; Previous
+            </button>
+            <span className="pagination-link">Page {page}</span>
+            <button 
+              className="pagination-link" 
+              onClick={handleNext} 
+              disabled={!nextCursor || isLoading}
+            >
+              Next &gt;&gt;
+            </button>
+          </div>
+        </>
       ) : (
-        <p>No apps available at the moment.</p>
+        <div className="empty-state">
+          <p>No apps available at the moment.</p>
+        </div>
       )}
     </div>
   );
