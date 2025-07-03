@@ -338,8 +338,8 @@ resource "aws_iam_role" "publisher_exec" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action    = "sts:AssumeRole",
       Effect    = "Allow",
+      Action    = "sts:AssumeRole",
       Principal = {
         Service = "lambda.amazonaws.com"
       }
@@ -355,10 +355,12 @@ resource "aws_lambda_function" "publisher" {
   handler         = "publisher"
   runtime         = "provided.al2"
   architectures   = ["x86_64"]
+  depends_on = [aws_dynamodb_table.app_table]
 
   environment {
     variables = {
       apps_bucket = aws_s3_bucket.apps.bucket
+      app_table = aws_dynamodb_table.app_table.name
     }
   }
 
@@ -368,6 +370,28 @@ resource "aws_lambda_function" "publisher" {
 resource "aws_iam_role_policy_attachment" "publisher_basic_policy" {
   role       = aws_iam_role.publisher_exec.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "publisher_dynamodb_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-publisher-dynamodb-policy"
+  role = aws_iam_role.publisher_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem"
+        ],
+        Resource = [
+          aws_dynamodb_table.app_table.arn,
+          "${aws_dynamodb_table.app_table.arn}/index/*"
+        ]
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "publisher_s3_policy" {
@@ -388,6 +412,23 @@ resource "aws_iam_role_policy" "publisher_s3_policy" {
       },
     ]
   })
+}
+
+# ---------------------------------------------
+# App Table
+# ---------------------------------------------
+
+resource "aws_dynamodb_table" "app_table" {
+  name           = "${var.project_name}-${var.environment}-app-table"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "appId"
+
+  attribute {
+    name = "appId"
+    type = "S"
+  }
+
+  tags = local.tags
 }
 
 # ---------------------------------------------
