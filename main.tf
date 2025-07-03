@@ -351,8 +351,9 @@ resource "aws_lambda_function" "publisher" {
 
   environment {
     variables = {
-      apps_bucket = aws_s3_bucket.apps.bucket
-      app_table = aws_dynamodb_table.app_table.name
+      apps_bucket        = aws_s3_bucket.apps.bucket
+      app_metadata_queue = aws_sqs_queue.app_metadata_queue.name
+      app_table_name     = aws_dynamodb_table.app_table.name
     }
   }
 
@@ -362,6 +363,44 @@ resource "aws_lambda_function" "publisher" {
 resource "aws_iam_role_policy_attachment" "publisher_basic_policy" {
   role       = aws_iam_role.publisher_exec.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "publisher_s3_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-publisher-s3-policy"
+  role = aws_iam_role.publisher_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "s3:PutObject"
+        ],
+        Resource = "${aws_s3_bucket.apps.arn}/*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "publisher_sqs_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-publisher-sqs-policy"
+  role = aws_iam_role.publisher_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ],
+        Resource = aws_sqs_queue.app_metadata_queue.arn
+      },
+    ]
+  })
 }
 
 resource "aws_iam_role_policy" "publisher_dynamodb_policy" {
@@ -375,35 +414,38 @@ resource "aws_iam_role_policy" "publisher_dynamodb_policy" {
         Effect = "Allow",
         Action = [
           "dynamodb:PutItem",
-          "dynamodb:UpdateItem"
+          "dynamodb:UpdateItem",
         ],
         Resource = [
           aws_dynamodb_table.app_table.arn,
           "${aws_dynamodb_table.app_table.arn}/index/*"
         ]
-      }
+      },
     ]
   })
 }
 
-resource "aws_iam_role_policy" "publisher_s3_policy" {
-  name = "${var.project_name}-${var.environment}-lambda-publisher-s3-policy"
-  role = aws_iam_role.publisher_exec.id
+# SQS Event Source Mapping for Publisher Lambda
+resource "aws_lambda_event_source_mapping" "publisher_sqs_trigger" {
+  event_source_arn = aws_sqs_queue.app_metadata_queue.arn
+  function_name    = aws_lambda_function.publisher.arn
+  batch_size       = 10
+  enabled          = true
+}
 
-   policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [
-      {
-        Effect = "Allow",
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ],
-        Resource = "${aws_s3_bucket.apps.arn}/*"
-      },
-    ]
-  })
+# ---------------------------------------------
+# App MetaData SQS Queue
+# ---------------------------------------------
+
+resource "aws_sqs_queue" "app_metadata_queue" {
+  name                      = "${var.project_name}-${var.environment}-app-metadata-queue"
+  delay_seconds             = 0
+  max_message_size          = 262144
+  message_retention_seconds = 1209600
+  receive_wait_time_seconds = 0
+  visibility_timeout_seconds = 60
+
+  tags = local.tags
 }
 
 # ---------------------------------------------
@@ -418,6 +460,23 @@ resource "aws_dynamodb_table" "app_table" {
   attribute {
     name = "appId"
     type = "S"
+  }
+
+  attribute {
+    name = "publisherId"
+    type = "S"
+  }
+
+  attribute {
+    name = "uploadTimestamp"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "publisherId-uploadTimestamp-index"
+    hash_key        = "publisherId"
+    range_key       = "uploadTimestamp"
+    projection_type = "ALL"
   }
 
   tags = local.tags
@@ -747,7 +806,8 @@ resource "aws_lambda_function" "unzip" {
 
   environment {
     variables = {
-      apps_bucket = aws_s3_bucket.apps.bucket
+      apps_bucket        = aws_s3_bucket.apps.bucket
+      app_metadata_queue = aws_sqs_queue.app_metadata_queue.name
     }
   }
 
@@ -788,6 +848,25 @@ resource "aws_iam_role_policy" "unzip_s3_policy" {
           "s3:DeleteObject"
         ],
         Resource = "${aws_s3_bucket.apps.arn}/*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "unzip_sqs_policy" {
+  name = "${var.project_name}-${var.environment}-lambda-unzip-sqs-policy"
+  role = aws_iam_role.unzip_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sqs:SendMessage",
+          "sqs:GetQueueUrl"
+        ],
+        Resource = aws_sqs_queue.app_metadata_queue.arn
       },
     ]
   })

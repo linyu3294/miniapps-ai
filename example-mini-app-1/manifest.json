@@ -2,6 +2,7 @@
   "name": "My Example Mini App - Shape",
   "short_name": "ExampleAppShape",
   "start_url": "index.html",
+  "description": "This is an example mini app that shows a shape",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#667eea",

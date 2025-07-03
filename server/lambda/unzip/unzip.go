@@ -4,19 +4,32 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go/aws"
 )
+
+type AppMetadataMessage struct {
+	AppSlug         string    `json:"app_slug"`
+	VersionId       string    `json:"version_id"`
+	S3FilePath      string    `json:"s3_file_path"`
+	UploadTimestamp time.Time `json:"upload_timestamp"`
+	ProcessedFiles  []string  `json:"processed_files"`
+	ManifestFound   bool      `json:"manifest_found"`
+	ManifestContent string    `json:"manifest_content,omitempty"`
+}
 
 func getMimeType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -42,13 +55,39 @@ func getMimeType(filename string) string {
 	}
 }
 
+func sendAppMetadataMessage(ctx context.Context, sqsClient *sqs.Client, queueName string, metadata AppMetadataMessage) error {
+	queueUrlResp, err := sqsClient.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{
+		QueueName: aws.String(queueName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get queue URL: %w", err)
+	}
+
+	messageBody, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	_, err = sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    queueUrlResp.QueueUrl,
+		MessageBody: aws.String(string(messageBody)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send message to SQS: %w", err)
+	}
+	return nil
+}
+
 func handleRequest(ctx context.Context, s3Event events.S3Event) error {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 	s3Client := s3.NewFromConfig(cfg)
+	sqsClient := sqs.NewFromConfig(cfg)
+
 	appsBucket := os.Getenv("apps_bucket")
+	queueName := os.Getenv("app_metadata_queue")
 
 	for _, record := range s3Event.Records {
 		sourceBucket := record.S3.Bucket.Name
@@ -64,7 +103,6 @@ func handleRequest(ctx context.Context, s3Event events.S3Event) error {
 		}
 		appSlug := parts[1]
 		versionId := parts[2]
-		_ = versionId // Explicitly ignore the versionId to satisfy the linter
 
 		resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: aws.String(sourceBucket),
@@ -85,6 +123,10 @@ func handleRequest(ctx context.Context, s3Event events.S3Event) error {
 			return fmt.Errorf("failed to create zip reader: %w", err)
 		}
 
+		var processedFiles []string
+		var manifestContent string
+		manifestFound := false
+
 		for _, file := range zipReader.File {
 			if file.FileInfo().IsDir() {
 				continue
@@ -101,6 +143,12 @@ func handleRequest(ctx context.Context, s3Event events.S3Event) error {
 				return fmt.Errorf("failed to read file content from zip: %w", err)
 			}
 
+			// Check if this is a manifest file
+			if strings.ToLower(file.Name) == "manifest.json" {
+				manifestFound = true
+				manifestContent = string(fileBody)
+			}
+
 			destKey := filepath.Join("app", appSlug, file.Name)
 			contentType := getMimeType(file.Name)
 
@@ -114,8 +162,25 @@ func handleRequest(ctx context.Context, s3Event events.S3Event) error {
 				return fmt.Errorf("failed to upload unzipped file %s: %w", destKey, err)
 			}
 			log.Printf("Successfully uploaded %s", destKey)
+			processedFiles = append(processedFiles, destKey)
 		}
 
+		// Send metadata message to SQS
+		metadata := AppMetadataMessage{
+			AppSlug:         appSlug,
+			VersionId:       versionId,
+			S3FilePath:      fmt.Sprintf("app/%s/", appSlug),
+			UploadTimestamp: time.Now(),
+			ProcessedFiles:  processedFiles,
+			ManifestFound:   manifestFound,
+			ManifestContent: manifestContent,
+		}
+
+		if err := sendAppMetadataMessage(ctx, sqsClient, queueName, metadata); err != nil {
+			log.Printf("Failed to send metadata message: %v", err)
+		}
+
+		// Delete the original zip file
 		_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 			Bucket: aws.String(sourceBucket),
 			Key:    aws.String(sourceKey),

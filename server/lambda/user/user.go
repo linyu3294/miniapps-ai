@@ -300,6 +300,7 @@ func handleRequest(ctx context.Context, event json.RawMessage) (interface{}, err
 		return nil, fmt.Errorf("failed to parse event: %w", err)
 	}
 
+	// Handle API Gateway event
 	if requestContext, ok := eventMap["requestContext"].(map[string]interface{}); ok {
 		if _, hasHTTP := requestContext["http"]; hasHTTP {
 			var apiEvent events.APIGatewayV2HTTPRequest
@@ -310,6 +311,7 @@ func handleRequest(ctx context.Context, event json.RawMessage) (interface{}, err
 		}
 	}
 
+	// Handle Cognito event
 	if _, ok := eventMap["triggerSource"]; ok {
 		if userPoolID, hasUserPool := eventMap["userPoolId"]; hasUserPool && userPoolID != nil {
 			var cognitoEvent events.CognitoEventUserPoolsPostConfirmation

@@ -12,20 +12,23 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/google/uuid"
 )
 
 /*****************************************************/
 // Publish Request types
 /*****************************************************/
-
 type Manifest struct {
-	Name      string `json:"name"`
-	ShortName string `json:"short_name"`
-	StartUrl  string `json:"start_url"`
-	Display   string `json:"display"`
-	Icons     []Icon `json:"icons"`
+	Name        string `json:"name"`
+	ShortName   string `json:"short_name"`
+	StartUrl    string `json:"start_url"`
+	Display     string `json:"display"`
+	Description string `json:"description"`
+	Icons       []Icon `json:"icons"`
 }
 
 type Icon struct {
@@ -49,9 +52,37 @@ type PublishRequest struct {
 }
 
 /*****************************************************/
+// App Metadata types for SQS processing
+/*****************************************************/
+type AppMetadataMessage struct {
+	AppSlug         string    `json:"app_slug"`
+	VersionId       string    `json:"version_id"`
+	S3FilePath      string    `json:"s3_file_path"`
+	UploadTimestamp time.Time `json:"upload_timestamp"`
+	ProcessedFiles  []string  `json:"processed_files"`
+	ManifestFound   bool      `json:"manifest_found"`
+	ManifestContent string    `json:"manifest_content,omitempty"`
+}
+
+/*****************************************************/
+// App Record types for DynamoDB
+/*****************************************************/
+type AppRecord struct {
+	AppId           string   `dynamodbav:"appId"`
+	AppSlug         string   `dynamodbav:"appSlug"`
+	PublisherId     string   `dynamodbav:"publisherId"`
+	UploadTimestamp string   `dynamodbav:"uploadTimestamp"`
+	VersionNumber   int      `dynamodbav:"versionNumber"`
+	S3FilePath      string   `dynamodbav:"s3FilePath"`
+	AppDescription  string   `dynamodbav:"appDescription"`
+	AppName         string   `dynamodbav:"appName"`
+	ManifestContent string   `dynamodbav:"manifestContent,omitempty"`
+	ProcessedFiles  []string `dynamodbav:"processedFiles"`
+}
+
+/*****************************************************/
 // Publish Response types
 /*****************************************************/
-
 type PublishResponse struct {
 	Message      string `json:"message"`
 	PresignedUrl string `json:"presigned_url"`
@@ -60,7 +91,6 @@ type PublishResponse struct {
 /*****************************************************/
 // Other types
 /*****************************************************/
-
 type Response events.APIGatewayV2HTTPResponse
 
 const (
@@ -73,9 +103,39 @@ type ErrorResponse struct {
 }
 
 /*****************************************************/
+// Response functions
+/*****************************************************/
+func createErrorResponse(statusCode int, message string) (events.APIGatewayV2HTTPResponse, error) {
+	errorResp := ErrorResponse{Error: message}
+	body, _ := json.Marshal(errorResp)
+	return events.APIGatewayV2HTTPResponse{
+		StatusCode: statusCode,
+		Headers:    map[string]string{contentTypeHeader: jsonContentType},
+		Body:       string(body),
+	}, nil
+}
+
+func createSuccessResponse(statusCode int, data interface{}) events.APIGatewayV2HTTPResponse {
+	body, _ := json.Marshal(data)
+	return events.APIGatewayV2HTTPResponse{
+		StatusCode: statusCode,
+		Headers:    map[string]string{contentTypeHeader: jsonContentType},
+		Body:       string(body),
+	}
+}
+
+func validateAppEntrypoint(entrypoint string, files []File) (events.APIGatewayV2HTTPResponse, error) {
+	for _, file := range files {
+		if file.Filename == entrypoint {
+			return events.APIGatewayV2HTTPResponse{}, nil
+		}
+	}
+	return createErrorResponse(400, "The entrypoint is not a valid file")
+}
+
+/*****************************************************/
 // Validation functions
 /*****************************************************/
-
 func validatePublisher(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	claims := request.RequestContext.Authorizer.JWT.Claims
 	groupsClaim, ok := claims["cognito:groups"]
@@ -194,35 +254,52 @@ func validateAppFiles(files []File) (events.APIGatewayV2HTTPResponse, error) {
 }
 
 /*****************************************************/
-// Response functions
+// DynamoDB functions
 /*****************************************************/
+func saveAppMetadata(ctx context.Context, dynamoClient *dynamodb.Client, tableName string, metadata AppMetadataMessage) error {
+	var manifest Manifest
+	appName := metadata.AppSlug // Default to app slug
+	appDescription := ""
 
-func createErrorResponse(statusCode int, message string) (events.APIGatewayV2HTTPResponse, error) {
-	errorResp := ErrorResponse{Error: message}
-	body, _ := json.Marshal(errorResp)
-	return events.APIGatewayV2HTTPResponse{
-		StatusCode: statusCode,
-		Headers:    map[string]string{contentTypeHeader: jsonContentType},
-		Body:       string(body),
-	}, nil
-}
-
-func createSuccessResponse(statusCode int, data interface{}) events.APIGatewayV2HTTPResponse {
-	body, _ := json.Marshal(data)
-	return events.APIGatewayV2HTTPResponse{
-		StatusCode: statusCode,
-		Headers:    map[string]string{contentTypeHeader: jsonContentType},
-		Body:       string(body),
-	}
-}
-
-func validateAppEntrypoint(entrypoint string, files []File) (events.APIGatewayV2HTTPResponse, error) {
-	for _, file := range files {
-		if file.Filename == entrypoint {
-			return events.APIGatewayV2HTTPResponse{}, nil
+	if metadata.ManifestFound && metadata.ManifestContent != "" {
+		if err := json.Unmarshal([]byte(metadata.ManifestContent), &manifest); err == nil {
+			if manifest.Name != "" {
+				appName = manifest.Name
+			}
+			if manifest.Description != "" {
+				appDescription = manifest.Description
+			}
 		}
 	}
-	return createErrorResponse(400, "The entrypoint is not a valid file")
+	appId := uuid.New().String()
+
+	appRecord := AppRecord{
+		AppId:           appId,
+		AppSlug:         metadata.AppSlug,
+		PublisherId:     metadata.VersionId,
+		UploadTimestamp: metadata.UploadTimestamp.Format(time.RFC3339),
+		VersionNumber:   1,
+		S3FilePath:      metadata.S3FilePath,
+		AppDescription:  appDescription,
+		AppName:         appName,
+		ManifestContent: metadata.ManifestContent,
+		ProcessedFiles:  metadata.ProcessedFiles,
+	}
+	item, err := attributevalue.MarshalMap(appRecord)
+	if err != nil {
+		return fmt.Errorf("failed to marshal app record: %w", err)
+	}
+
+	_, err = dynamoClient.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(tableName),
+		Item:      item,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to put item in DynamoDB: %w", err)
+	}
+
+	log.Printf("Successfully saved app metadata for %s (ID: %s)", metadata.AppSlug, appId)
+	return nil
 }
 
 /*****************************************************/
@@ -300,9 +377,69 @@ func handlePostRequest(ctx context.Context, request events.APIGatewayV2HTTPReque
 	}), nil
 }
 
-func handleRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	log.Println("API Gateway event detected, processing as a publish request...")
-	return handlePostRequest(ctx, request)
+func handleSQSEvent(ctx context.Context, sqsEvent events.SQSEvent) error {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS configuration: %w", err)
+	}
+
+	dynamoClient := dynamodb.NewFromConfig(cfg)
+	tableName := os.Getenv("app_table_name")
+
+	for _, record := range sqsEvent.Records {
+		log.Printf("Processing SQS message: %s", record.MessageId)
+
+		var metadata AppMetadataMessage
+		if err := json.Unmarshal([]byte(record.Body), &metadata); err != nil {
+			log.Printf("Failed to unmarshal SQS message: %v", err)
+			continue // Skip this message but continue processing others
+		}
+
+		if err := saveAppMetadata(ctx, dynamoClient, tableName, metadata); err != nil {
+			log.Printf("Failed to save app metadata: %v", err)
+			return err // Return error to trigger message retry
+		}
+	}
+
+	return nil
+}
+
+func handleRequest(ctx context.Context, event json.RawMessage) (interface{}, error) {
+	var eventMap map[string]interface{}
+	if err := json.Unmarshal(event, &eventMap); err != nil {
+		return nil, fmt.Errorf("failed to parse event: %w", err)
+	}
+
+	// Handle API Gateway event (relayed from user lambda)
+	if requestContext, ok := eventMap["requestContext"].(map[string]interface{}); ok {
+		if _, hasHTTP := requestContext["http"]; hasHTTP {
+			var apiEvent events.APIGatewayV2HTTPRequest
+			if err := json.Unmarshal(event, &apiEvent); err != nil {
+				return nil, fmt.Errorf("failed to parse API Gateway event: %w", err)
+			}
+			return handlePostRequest(ctx, apiEvent)
+		}
+	}
+
+	// Check for SQS event (direct SQS trigger)
+	if records, ok := eventMap["Records"].([]interface{}); ok && len(records) > 0 {
+		if record, ok := records[0].(map[string]interface{}); ok {
+			if _, hasSQS := record["eventSource"]; hasSQS {
+				var sqsEvent events.SQSEvent
+				if err := json.Unmarshal(event, &sqsEvent); err != nil {
+					return nil, fmt.Errorf("failed to parse SQS event: %w", err)
+				}
+				err := handleSQSEvent(ctx, sqsEvent)
+				if err != nil {
+					return nil, err
+				}
+				return "Successfully processed SQS messages", nil
+			}
+		}
+	}
+
+	log.Printf("Unsupported event structure: %+v", eventMap)
+	return nil, fmt.Errorf("unsupported event type")
 }
 
 func main() {
