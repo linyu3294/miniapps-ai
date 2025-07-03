@@ -193,46 +193,11 @@ resource "aws_apigatewayv2_authorizer" "cognito" {
   }
 }
 
-// ----- TODO: Remove publisher lambda api gateway integration --------
-
-resource "aws_apigatewayv2_integration" "publisher" {
-  api_id           = aws_apigatewayv2_api.main.id
-  integration_type = "AWS_PROXY"
-  
-  integration_method = "POST"
-  integration_uri    = aws_lambda_function.publisher.invoke_arn
-  payload_format_version = "2.0"
-}
-
-resource "aws_apigatewayv2_route" "publisher" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "POST /publish/{app-slug}/version/{version-id}"
-  target    = "integrations/${aws_apigatewayv2_integration.publisher.id}"
-
-  authorization_type = "JWT"
-  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
-}
-
-resource "aws_lambda_permission" "publisher_apigw" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.publisher.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
-}
-
-// ----- TODO: Remove publisher lambda api gateway integration --------
-
-
-
-
-
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.main.id
   name        = "default"
   auto_deploy = true
 }
-
 
 # ---------------------------------------------
 # User Lambda Function
@@ -261,7 +226,9 @@ resource "aws_lambda_function" "user" {
   architectures   = ["x86_64"]
 
   environment {
-    variables = {}
+    variables = {
+      PUBLISHER_FUNCTION_NAME = aws_lambda_function.publisher.function_name
+    }
   }
 
   tags = local.tags
@@ -293,6 +260,22 @@ resource "aws_iam_role_policy" "user_cognito" {
   })
 }
 
+resource "aws_iam_role_policy" "user_lambda_invoke" {
+  name = "${var.project_name}-${var.environment}-user-lambda-invoke-policy"
+  role = aws_iam_role.user_exec.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = "lambda:InvokeFunction",
+        Resource = aws_lambda_function.publisher.arn
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_permission" "user_cognito_trigger" {
   statement_id  = "AllowCognitoPostConfirmation"
   action        = "lambda:InvokeFunction"
@@ -313,9 +296,18 @@ resource "aws_apigatewayv2_integration" "user" {
   depends_on = [aws_lambda_function.user, aws_cognito_user_pool.main]
 }
 
-resource "aws_apigatewayv2_route" "user" {
+resource "aws_apigatewayv2_route" "put_user_role" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "PUT /user-role"
+  target    = "integrations/${aws_apigatewayv2_integration.user.id}"
+
+  authorization_type = "JWT"
+  authorizer_id     = aws_apigatewayv2_authorizer.cognito.id
+}
+
+resource "aws_apigatewayv2_route" "user_publish" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /publish/{app-slug}/version/{version-id}"
   target    = "integrations/${aws_apigatewayv2_integration.user.id}"
 
   authorization_type = "JWT"

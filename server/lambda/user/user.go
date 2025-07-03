@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cognitoidentityprovider"
+	awslambda "github.com/aws/aws-sdk-go/service/lambda"
 )
 
 /*****************************************************/
@@ -31,10 +33,12 @@ type ErrorResponse struct {
 }
 
 var cognitoClient *cognitoidentityprovider.CognitoIdentityProvider
+var lambdaClient *awslambda.Lambda
 
 func init() {
 	sess := session.Must(session.NewSession())
 	cognitoClient = cognitoidentityprovider.New(sess)
+	lambdaClient = awslambda.New(sess)
 }
 
 /*****************************************************/
@@ -181,10 +185,52 @@ func handlePostConfirmation(
 	return event, nil
 }
 
+func relayToPublisherLambda(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	publisherFunctionName := os.Getenv("PUBLISHER_FUNCTION_NAME")
+
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return createErrorResponse(500, "Failed to marshal event")
+	}
+
+	result, err := lambdaClient.Invoke(&awslambda.InvokeInput{
+		FunctionName: aws.String(publisherFunctionName),
+		Payload:      eventJSON,
+	})
+	if err != nil {
+		log.Printf("Failed to invoke publisher lambda: %v", err)
+		return createErrorResponse(500, "Failed to process publish request")
+	}
+
+	var response events.APIGatewayV2HTTPResponse
+	if err := json.Unmarshal(result.Payload, &response); err != nil {
+		log.Printf("Failed to unmarshal publisher response: %v", err)
+		return createErrorResponse(500, "Invalid response from publisher")
+	}
+
+	return response, nil
+}
+
 func handleAPIGateway(
 	event events.APIGatewayV2HTTPRequest,
 ) (events.APIGatewayV2HTTPResponse, error) {
 
+	// Check if this is a publish request
+	if event.RequestContext.HTTP.Method == "POST" &&
+		strings.HasPrefix(event.RawPath, "/publish/") {
+		return relayToPublisherLambda(event)
+	}
+
+	// Handle user role management (PUT /user-role)
+	if event.RequestContext.HTTP.Method == "PUT" &&
+		event.RawPath == "/user-role" {
+		return handleUserRoleUpdate(event)
+	}
+
+	return createErrorResponse(404, "Endpoint not found")
+}
+
+func handleUserRoleUpdate(event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	var request UpdateRoleRequest
 	if err := json.Unmarshal([]byte(event.Body), &request); err != nil {
 		return createErrorResponse(400, "Invalid request body")
