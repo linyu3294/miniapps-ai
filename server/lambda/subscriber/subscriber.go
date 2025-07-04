@@ -232,7 +232,7 @@ func handleGetAllApps(ctx context.Context, request events.APIGatewayV2HTTPReques
 
 	log.Printf("Debug: Query parameters - limit: %s, cursor: %s", limitStr, cursor)
 
-	limit := 1 // default limit
+	limit := 12 // default limit
 	if limitStr != "" {
 		var err error
 		limit, err = strconv.Atoi(limitStr)

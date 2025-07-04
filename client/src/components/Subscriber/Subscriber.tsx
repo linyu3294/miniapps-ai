@@ -30,7 +30,7 @@ const SubscriberComponent = (): React.JSX.Element => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-      const limit = 1;
+      const limit = 12;
 
   useEffect(() => {
     if (activeTab === 'home') {
@@ -111,6 +111,13 @@ const SubscriberComponent = (): React.JSX.Element => {
 
   const renderHomeTab = (): React.JSX.Element => (
     <div className="tab-content">
+      <h3>App Store</h3>
+      <p>App store functionality coming soon...</p>
+    </div>
+  );
+
+  const renderStoreTab = (): React.JSX.Element => (
+    <div className="tab-content">
       <h3>Available Apps</h3>
       {isLoading ? (
         <div className="loading-container">
@@ -162,13 +169,6 @@ const SubscriberComponent = (): React.JSX.Element => {
           <p>No apps available at the moment.</p>
         </div>
       )}
-    </div>
-  );
-
-  const renderStoreTab = (): React.JSX.Element => (
-    <div className="tab-content">
-      <h3>App Store</h3>
-      <p>App store functionality coming soon...</p>
     </div>
   );
 
