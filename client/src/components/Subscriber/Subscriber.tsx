@@ -179,7 +179,6 @@ const SubscriberComponent = (): React.JSX.Element => {
 
   const renderStoreTab = (): React.JSX.Element => (
     <div className="tab-content">
-      <h3>Available Apps</h3>
       {isLoading ? (
         <div className="loading-container">
           <p>Loading apps...</p>
