@@ -22,7 +22,7 @@ interface AppListResponse {
 type TabType = 'home' | 'store';
 
 const SubscriberComponent = (): React.JSX.Element => {
-  const [activeTab, setActiveTab] = useState<TabType>('home');
+  const [activeTab, setActiveTab] = useState<TabType>('store');
   const [apps, setApps] = useState<App[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
@@ -33,7 +33,7 @@ const SubscriberComponent = (): React.JSX.Element => {
       const limit = 12;
 
   useEffect(() => {
-    if (activeTab === 'home') {
+    if (activeTab === 'store') {
       fetchApps(cursor);
     }
   }, [activeTab, cursor]);
