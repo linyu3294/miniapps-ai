@@ -471,11 +471,12 @@ resource "aws_lambda_function" "subscriber" {
   handler         = "subscriber"
   runtime         = "provided.al2"
   architectures   = ["x86_64"]
-  depends_on = [aws_dynamodb_table.app_table]
+  depends_on = [aws_dynamodb_table.app_table, aws_dynamodb_table.subscription_table]
 
   environment {
     variables = {
-      app_table_name = aws_dynamodb_table.app_table.name
+      app_table_name          = aws_dynamodb_table.app_table.name
+      subscription_table_name = aws_dynamodb_table.subscription_table.name
     }
   }
 
@@ -506,6 +507,21 @@ resource "aws_iam_role_policy" "subscriber_dynamodb_policy" {
           "${aws_dynamodb_table.app_table.arn}/index/*"
         ]
       },
+      {
+        Effect = "Allow",
+        Action = [
+          "dynamodb:Scan",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem"
+        ],
+        Resource = [
+          aws_dynamodb_table.subscription_table.arn,
+          "${aws_dynamodb_table.subscription_table.arn}/index/*"
+        ]
+      }
     ]
   })
 }
@@ -553,6 +569,36 @@ resource "aws_dynamodb_table" "app_table" {
     name            = "publisherId-uploadTimestamp-index"
     hash_key        = "publisherId"
     range_key       = "uploadTimestamp"
+    projection_type = "ALL"
+  }
+
+  tags = local.tags
+}
+
+# ---------------------------------------------
+# Subscription Table
+# ---------------------------------------------
+
+resource "aws_dynamodb_table" "subscription_table" {
+  name           = "${var.project_name}-${var.environment}-subscription-table"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "appId"
+  range_key      = "userId"
+
+  attribute {
+    name = "appId"
+    type = "S"
+  }
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "userId-appId-index"
+    hash_key        = "userId"
+    range_key       = "appId"
     projection_type = "ALL"
   }
 
