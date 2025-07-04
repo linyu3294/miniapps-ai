@@ -36,7 +36,8 @@ type ErrorResponse struct {
 var cognitoClient *cognitoidentityprovider.CognitoIdentityProvider
 var lambdaClient *awslambda.Lambda
 var publishRouteRegex *regexp.Regexp
-var subscriberRouteRegex *regexp.Regexp
+var subscribeGetAppsRouteRegex *regexp.Regexp
+var subscribePostSubscriptionRouteRegex *regexp.Regexp
 
 func init() {
 	sess := session.Must(session.NewSession())
@@ -45,7 +46,8 @@ func init() {
 
 	// Compile regex for publish route: publish/{app-slug}/version/{version-id}
 	publishRouteRegex = regexp.MustCompile(`publish/[^/]+/version/[^/]+`)
-	subscriberRouteRegex = regexp.MustCompile(`apps`)
+	subscribeGetAppsRouteRegex = regexp.MustCompile(`apps`)
+	subscribePostSubscriptionRouteRegex = regexp.MustCompile(`subscribe`)
 }
 
 /*****************************************************/
@@ -238,7 +240,13 @@ func handleAPIGateway(
 		return relayToPublisherLambda(event)
 	}
 
-	if event.RequestContext.HTTP.Method == "GET" && subscriberRouteRegex.MatchString(event.RawPath) {
+	// Check if this is a subscribe request using regex
+	if event.RequestContext.HTTP.Method == "POST" && subscribePostSubscriptionRouteRegex.MatchString(event.RawPath) {
+		log.Printf("Routing to subscriber lambda (matched regex pattern)")
+		return relayToSubscriberLambda(event)
+	}
+
+	if event.RequestContext.HTTP.Method == "GET" && subscribeGetAppsRouteRegex.MatchString(event.RawPath) {
 		log.Printf("Routing to subscriber lambda (matched regex pattern)")
 		return relayToSubscriberLambda(event)
 	}

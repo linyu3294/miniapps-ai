@@ -30,7 +30,9 @@ const SubscriberComponent = (): React.JSX.Element => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-      const limit = 12;
+  const [subscribingApps, setSubscribingApps] = useState<Set<string>>(new Set());
+  const [subscriptionErrors, setSubscriptionErrors] = useState<Map<string, string>>(new Map());
+  const limit = 12;
 
   useEffect(() => {
     if (activeTab === 'store') {
@@ -109,6 +111,65 @@ const SubscriberComponent = (): React.JSX.Element => {
     }
   };
 
+  const handleSubscribe = async (appId: string): Promise<void> => {
+    setSubscribingApps(prev => new Set([...prev, appId]));
+    setSubscriptionErrors(prev => {
+      const newErrors = new Map(prev);
+      newErrors.delete(appId);
+      return newErrors;
+    });
+
+    try {
+      const session = await fetchAuthSession();
+      const accessToken = session.tokens?.accessToken.toString();
+      
+      if (!accessToken) {
+        throw new Error('No access token available');
+      }
+
+      const apiDomain = import.meta.env.VITE_API_GATEWAY_HTTPS_URL;
+      if (!apiDomain) {
+        throw new Error('API Gateway URL not configured');
+      }
+
+      const url = `${apiDomain}/subscribe?appID=${appId}`;
+      console.log('Subscribe URL:', url);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (response.status === 200) {
+        console.log(`Successfully subscribed to app: ${appId}`);
+        // You might want to show a success message or update the UI here
+      } else if (response.status === 401) {
+        throw new Error('Authentication failed. Please sign in again.');
+      } else if (response.status === 403) {
+        throw new Error('You are not authorized to subscribe to this app.');
+      } else if (response.status === 409) {
+        throw new Error('You are already subscribed to this app.');
+      } else if (response.status === 500) {
+        throw new Error('Server error occurred. Please try again later.');
+      } else {
+        throw new Error(`Unexpected error: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Error subscribing to app:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to subscribe to app';
+      setSubscriptionErrors(prev => new Map([...prev, [appId, errorMessage]]));
+    } finally {
+      setSubscribingApps(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(appId);
+        return newSet;
+      });
+    }
+  };
+
   const renderHomeTab = (): React.JSX.Element => (
     <div className="tab-content">
       <h3>App Store</h3>
@@ -142,6 +203,20 @@ const SubscriberComponent = (): React.JSX.Element => {
                     <span className="app-version">v{app.versionNumber}</span>
                     <span className="app-publisher">by {app.publisherId}</span>
                   </div>
+                  <div className="app-actions">
+                    <button
+                      className="subscribe-button"
+                      onClick={() => handleSubscribe(app.appId)}
+                      disabled={subscribingApps.has(app.appId)}
+                    >
+                      {subscribingApps.has(app.appId) ? 'Subscribing...' : 'Subscribe'}
+                    </button>
+                  </div>
+                  {subscriptionErrors.has(app.appId) && (
+                    <div className="subscription-error">
+                      <p className="error-text">{subscriptionErrors.get(app.appId)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

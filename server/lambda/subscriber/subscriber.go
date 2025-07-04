@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -110,7 +111,7 @@ func validateSubscriber(request events.APIGatewayV2HTTPRequest) (events.APIGatew
 	isSubscriber := false
 	for _, group := range groupsList {
 		log.Printf("Checking group: '%s'", group)
-		if group == "Subscriber" || group == "Publisher" {
+		if group == "Subscriber" {
 			isSubscriber = true
 			break
 		}
@@ -214,18 +215,48 @@ func getAllApps(ctx context.Context, dynamoClient *dynamodb.Client, tableName st
 }
 
 /*****************************************************/
+// Subscription helper functions
+/*****************************************************/
+// checkSubscriptionExists checks if a subscription already exists for the given appID and userID
+func checkSubscriptionExists(ctx context.Context, dynamoClient *dynamodb.Client, tableName, appID, userID string) (bool, error) {
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String(tableName),
+		Key: map[string]types.AttributeValue{
+			"appId":  &types.AttributeValueMemberS{Value: appID},
+			"userId": &types.AttributeValueMemberS{Value: userID},
+		},
+	}
+	result, err := dynamoClient.GetItem(ctx, input)
+	if err != nil {
+		log.Printf("Debug: Error checking subscription existence: %v", err)
+		return false, err
+	}
+	exists := result.Item != nil
+	return exists, nil
+}
+
+func insertSubscription(ctx context.Context, dynamoClient *dynamodb.Client, tableName, appID, userID string) error {
+	subscriptionTime := time.Now().UTC().Format(time.RFC3339)
+
+	input := &dynamodb.PutItemInput{
+		TableName: aws.String(tableName),
+		Item: map[string]types.AttributeValue{
+			"appId":            &types.AttributeValueMemberS{Value: appID},
+			"userId":           &types.AttributeValueMemberS{Value: userID},
+			"subscriptionTime": &types.AttributeValueMemberS{Value: subscriptionTime},
+		},
+	}
+	_, err := dynamoClient.PutItem(ctx, input)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+/*****************************************************/
 // Handler functions
 /*****************************************************/
 func handleGetAllApps(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	log.Printf("Debug: handleGetAllApps started")
-
-	// Validate subscriber permissions
-	if errorResp, err := validateSubscriber(request); err != nil {
-		return errorResp, err
-	} else if errorResp.StatusCode != 0 {
-		return errorResp, nil
-	}
-
 	// Parse query parameters
 	limitStr := request.QueryStringParameters["limit"]
 	cursor := request.QueryStringParameters["cursor"]
@@ -270,16 +301,71 @@ func handleGetAllApps(ctx context.Context, request events.APIGatewayV2HTTPReques
 	return createSuccessResponse(200, response), nil
 }
 
+func handleSubscribe(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	// Parse query parameters
+	appID := request.QueryStringParameters["appID"]
+	claims := request.RequestContext.Authorizer.JWT.Claims
+	userID := claims["sub"]
+
+	log.Printf("Debug: handleSubscribe started with appID: %s, userId: %s", appID, userID)
+
+	if appID == "" {
+		return createErrorResponse(400, "appID is required")
+	}
+	if userID == "" {
+		return createErrorResponse(400, "User ID not found in token")
+	}
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Printf("Error loading AWS config: %v", err)
+		return createErrorResponse(500, "Internal server error")
+	}
+
+	dynamoClient := dynamodb.NewFromConfig(cfg)
+	subscriptionTableName := os.Getenv("subscription_table_name")
+
+	exists, err := checkSubscriptionExists(ctx, dynamoClient, subscriptionTableName, appID, userID)
+	if exists {
+		log.Printf("Debug: Subscription already exists for appID: %s, userID: %s", appID, userID)
+		return createErrorResponse(409, "You are already subscribed to this app")
+	}
+	if err != nil {
+		return createErrorResponse(500, "Error checking subscription status")
+	}
+
+	err = insertSubscription(ctx, dynamoClient, subscriptionTableName, appID, userID)
+	if err != nil {
+		return createErrorResponse(500, "Error creating subscription")
+	}
+
+	return createSuccessResponse(200, map[string]string{
+		"message": "Successfully subscribed to app",
+	}), nil
+}
+
 /*****************************************************/
 // Main handler
 /*****************************************************/
 func handleRequest(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	switch request.RouteKey {
-	case "GET /apps":
-		return handleGetAllApps(ctx, request)
-	default:
-		return createErrorResponse(404, "Route not found")
+	if errorResp, err := validateSubscriber(request); err != nil {
+		return errorResp, err
+	} else if errorResp.StatusCode != 0 {
+		return errorResp, nil
 	}
+	method := request.RequestContext.HTTP.Method
+	path := request.RequestContext.HTTP.Path
+	rawPath := request.RawPath
+	// Handle GET requests for getting all apps
+	if method == "GET" && (strings.Contains(path, "/apps") || strings.Contains(rawPath, "/apps")) {
+		log.Printf("Debug: Routing to handleGetAllApps")
+		return handleGetAllApps(ctx, request)
+	}
+	// Handle POST requests to subscribe to an app
+	if method == "POST" && (strings.Contains(path, "/subscribe") || strings.Contains(rawPath, "/subscribe")) {
+		log.Printf("Debug: Routing to handleSubscribe")
+		return handleSubscribe(ctx, request)
+	}
+	return createErrorResponse(404, "Route not found")
 }
 
 func main() {
