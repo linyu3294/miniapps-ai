@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -43,6 +45,10 @@ type AppDetailResponse struct {
 	App AppListing `json:"app"`
 }
 
+const (
+	extraToDetermineIfNextPage = 1
+)
+
 /*****************************************************/
 // Response types
 /*****************************************************/
@@ -56,7 +62,7 @@ type ErrorResponse struct {
 }
 
 /*****************************************************/
-// Response functions
+// Response Helper functions
 /*****************************************************/
 func createErrorResponse(statusCode int, message string) (events.APIGatewayV2HTTPResponse, error) {
 	errorResp := ErrorResponse{Error: message}
@@ -78,7 +84,7 @@ func createSuccessResponse(statusCode int, data interface{}) events.APIGatewayV2
 }
 
 /*****************************************************/
-// Validation functions
+// Validation Helper functions
 /*****************************************************/
 func validateSubscriber(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	claims := request.RequestContext.Authorizer.JWT.Claims
@@ -124,24 +130,24 @@ func validateSubscriber(request events.APIGatewayV2HTTPRequest) (events.APIGatew
 }
 
 /*****************************************************/
-// DynamoDB query functions
+// DynamoDB Query helper functions
 /*****************************************************/
-func getAllApps(ctx context.Context, dynamoClient *dynamodb.Client, tableName string, limit int, cursor string) ([]AppListing, string, error) {
+func getLastEvaluatedKey(cursor string) (
+	map[string]types.AttributeValue,
+	error,
+) {
 	var lastEvaluatedKey map[string]types.AttributeValue
-
-	log.Printf("Debug: getAllApps called with tableName=%s, limit=%d, cursor=%s", tableName, limit, cursor)
-
 	if cursor != "" {
 		decodedCursor, err := url.QueryUnescape(cursor)
 		if err != nil {
 			log.Printf("Debug: Error decoding cursor: %v", err)
-			return nil, "", err
+			return nil, err
 		}
 
 		var tempMap map[string]interface{}
 		if err := json.Unmarshal([]byte(decodedCursor), &tempMap); err != nil {
 			log.Printf("Debug: Error unmarshaling cursor JSON: %v", err)
-			return nil, "", err
+			return nil, err
 		}
 
 		lastEvaluatedKey = make(map[string]types.AttributeValue)
@@ -150,28 +156,45 @@ func getAllApps(ctx context.Context, dynamoClient *dynamodb.Client, tableName st
 				lastEvaluatedKey[k] = &types.AttributeValueMemberS{Value: strVal}
 			}
 		}
-		log.Printf("Debug: Parsed lastEvaluatedKey: %+v", lastEvaluatedKey)
 	}
+	return lastEvaluatedKey, nil
+}
 
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(tableName),
-		Limit:     aws.Int32(int32(limit + 1)), // fetch one more to check if there are more pages
+func getNextCursor(apps []AppListing, limit int) (string, error) {
+	var nextCursor string
+	if len(apps) > limit {
+		apps = apps[:limit]
+
+		// Since we got more items than requested, there are more pages
+		// Generate cursor from the last item we're returning
+		lastApp := apps[len(apps)-extraToDetermineIfNextPage]
+		cursorMap := map[string]string{
+			"appId": lastApp.AppId,
+		}
+		nextCursorBytes, err := json.Marshal(cursorMap)
+		if err != nil {
+			log.Printf("Debug: Error creating next cursor: %v", err)
+			return "", err
+		}
+		nextCursor = string(nextCursorBytes)
+		log.Printf("Debug: Generated nextCursor from last returned item: %s", nextCursor)
 	}
+	return nextCursor, nil
+}
 
-	if lastEvaluatedKey != nil {
-		input.ExclusiveStartKey = lastEvaluatedKey
-	}
-
-	log.Printf("Debug: About to perform DynamoDB scan with input: %+v", input)
-
+func getApps(
+	ctx context.Context,
+	dynamoClient *dynamodb.Client,
+	input *dynamodb.ScanInput,
+) (
+	[]AppListing,
+	error,
+) {
 	result, err := dynamoClient.Scan(ctx, input)
 	if err != nil {
 		log.Printf("Debug: DynamoDB scan failed: %v", err)
-		return nil, "", err
+		return nil, err
 	}
-
-	log.Printf("Debug: DynamoDB scan succeeded. Count: %d, ScannedCount: %d", result.Count, result.ScannedCount)
-	log.Printf("Debug: Number of items returned: %d", len(result.Items))
 
 	if len(result.Items) > 0 {
 		log.Printf("Debug: First item: %+v", result.Items[0])
@@ -181,41 +204,63 @@ func getAllApps(ctx context.Context, dynamoClient *dynamodb.Client, tableName st
 	err = attributevalue.UnmarshalListOfMaps(result.Items, &apps)
 	if err != nil {
 		log.Printf("Debug: Error unmarshaling items: %v", err)
-		return nil, "", err
+		return nil, err
 	}
 
-	log.Printf("Debug: Successfully unmarshaled %d apps", len(apps))
+	return apps, nil
+}
 
-	// Check if we have more items than requested (we fetched limit + 1)
-	var nextCursor string
-	if len(apps) > limit {
-		// Remove the extra item
-		apps = apps[:limit]
-		log.Printf("Debug: Trimmed apps to %d (limit)", len(apps))
+func getLimit(limitStr string) (int, error) {
+	limit := 12 // default limit
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit <= 0 || limit > 100 {
+			return 0, errors.New("invalid limit parameter. must be a positive number between 1 and 100")
+		}
+	}
+	return limit, nil
+}
 
-		// Since we got more items than requested, there are more pages
-		// Generate cursor from the last item we're returning
-		lastApp := apps[len(apps)-1]
-		cursorMap := map[string]string{
-			"appId": lastApp.AppId,
-		}
-		nextCursorBytes, err := json.Marshal(cursorMap)
-		if err != nil {
-			log.Printf("Debug: Error creating next cursor: %v", err)
-			return nil, "", err
-		}
-		nextCursor = string(nextCursorBytes)
-		log.Printf("Debug: Generated nextCursor from last returned item: %s", nextCursor)
-	} else {
-		log.Printf("Debug: Got %d apps (not more than limit %d), no more pages", len(apps), limit)
+type SubscriptionItem struct {
+	AppId            string `dynamodbav:"appId"`
+	UserId           string `dynamodbav:"userId"`
+	SubscriptionTime string `dynamodbav:"subscriptionTime"`
+}
+
+func getSubscribedAppIdsBasedOnUserId(ctx context.Context, dynamoClient *dynamodb.Client, userID string) ([]string, error) {
+	input := &dynamodb.ScanInput{
+		TableName:        aws.String(os.Getenv("subscription_table_name")),
+		FilterExpression: aws.String("userId = :userId"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":userId": &types.AttributeValueMemberS{Value: userID},
+		},
+	}
+	result, err := dynamoClient.Scan(ctx, input)
+	if err != nil {
+		log.Printf("Debug: Error scanning subscription table: %v", err)
+		return nil, err
 	}
 
-	log.Printf("Debug: Returning %d apps, nextCursor: %s", len(apps), nextCursor)
-	return apps, nextCursor, nil
+	var subscriptions []SubscriptionItem
+	err = attributevalue.UnmarshalListOfMaps(result.Items, &subscriptions)
+	if err != nil {
+		log.Printf("Debug: Error unmarshaling items: %v", err)
+		return nil, err
+	}
+
+	// Extract app IDs from the subscription items
+	var appIds []string
+	for _, subscription := range subscriptions {
+		appIds = append(appIds, subscription.AppId)
+	}
+
+	log.Printf("Debug: Found %d subscribed app IDs for user %s: %v", len(appIds), userID, appIds)
+	return appIds, nil
 }
 
 /*****************************************************/
-// Subscription helper functions
+// POST Subscription helper functions
 /*****************************************************/
 // checkSubscriptionExists checks if a subscription already exists for the given appID and userID
 func checkSubscriptionExists(ctx context.Context, dynamoClient *dynamodb.Client, tableName, appID, userID string) (bool, error) {
@@ -254,39 +299,111 @@ func insertSubscription(ctx context.Context, dynamoClient *dynamodb.Client, tabl
 }
 
 /*****************************************************/
+// DynamoDB query functions
+/*****************************************************/
+func getAllApps(ctx context.Context, dynamoClient *dynamodb.Client, input *dynamodb.ScanInput, limit int, cursor string) ([]AppListing, string, error) {
+	var lastEvaluatedKey map[string]types.AttributeValue
+
+	lastEvaluatedKey, err := getLastEvaluatedKey(cursor)
+	if err != nil {
+		log.Printf("Debug: Error getting last evaluated key: %v", err)
+		return nil, "", err
+	}
+
+	if lastEvaluatedKey != nil {
+		input.ExclusiveStartKey = lastEvaluatedKey
+	}
+
+	apps, err := getApps(ctx, dynamoClient, input)
+	if err != nil {
+		log.Printf("Debug: Error getting apps: %v", err)
+		return nil, "", err
+	}
+
+	nextCursor, err := getNextCursor(apps, limit)
+	if err != nil {
+		log.Printf("Debug: Error getting next cursor: %v", err)
+		return nil, "", err
+	}
+
+	return apps, nextCursor, nil
+}
+
+/*****************************************************/
 // Handler functions
 /*****************************************************/
 func handleGetAllApps(ctx context.Context, request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	// Parse query parameters
 	limitStr := request.QueryStringParameters["limit"]
 	cursor := request.QueryStringParameters["cursor"]
+	getSubscribed := request.QueryStringParameters["getSubscribed"] == "true"
 
 	log.Printf("Debug: Query parameters - limit: %s, cursor: %s", limitStr, cursor)
 
-	limit := 12 // default limit
-	if limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil || limit <= 0 || limit > 100 {
-			return createErrorResponse(400, "Invalid limit parameter. Must be a positive number between 1 and 100")
-		}
+	limit, err := getLimit(limitStr)
+	if err != nil {
+		log.Printf("Debug-getAllSubscribedApps: Error getting limit: %v", err)
+		return createErrorResponse(400, err.Error())
 	}
-
-	log.Printf("Debug: Using limit: %d", limit)
-
 	// Load AWS configuration
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Printf("Error loading AWS config: %v", err)
 		return createErrorResponse(500, "Internal server error")
 	}
+	log.Printf("Debug-getAllSubscribedApps: limit: %d", limit)
 
 	dynamoClient := dynamodb.NewFromConfig(cfg)
 	tableName := os.Getenv("app_table_name")
 
-	log.Printf("Debug: Using DynamoDB table name: %s", tableName)
+	log.Printf("Debug-getAllSubscribedApps: getSubscribed: %t", getSubscribed)
 
-	apps, nextCursor, err := getAllApps(ctx, dynamoClient, tableName, limit, cursor)
+	var input *dynamodb.ScanInput
+	if getSubscribed {
+		userID := request.RequestContext.Authorizer.JWT.Claims["sub"]
+		appIds, err := getSubscribedAppIdsBasedOnUserId(ctx, dynamoClient, userID)
+		if err != nil {
+			log.Printf("Error getting subscribed app IDs: %v", err)
+			return createErrorResponse(500, "Error retrieving subscribed apps")
+		}
+
+		if len(appIds) == 0 {
+			// If user has no subscriptions, return empty result
+			response := AppListResponse{
+				Apps:       []AppListing{},
+				Count:      0,
+				NextCursor: "",
+			}
+			return createSuccessResponse(200, response), nil
+		}
+
+		// Build FilterExpression with individual parameters for each app ID
+		var filterParts []string
+		expressionAttributeValues := make(map[string]types.AttributeValue)
+		for i, appId := range appIds {
+			paramName := fmt.Sprintf(":appId%d", i)
+			filterParts = append(filterParts, fmt.Sprintf("appId = %s", paramName))
+			expressionAttributeValues[paramName] = &types.AttributeValueMemberS{Value: appId}
+		}
+		filterExpression := strings.Join(filterParts, " OR ")
+
+		input = &dynamodb.ScanInput{
+			TableName:                 aws.String(tableName),
+			FilterExpression:          aws.String(filterExpression),
+			ExpressionAttributeValues: expressionAttributeValues,
+			Limit:                     aws.Int32(int32(limit + extraToDetermineIfNextPage)),
+		}
+	} else {
+		input = &dynamodb.ScanInput{
+			TableName: aws.String(tableName),
+			// fetch one more to check if there are more pages
+			Limit: aws.Int32(int32(limit + extraToDetermineIfNextPage)),
+		}
+	}
+
+	log.Printf("Debug-getAllSubscribedApps: input: %+v", input)
+	apps, nextCursor, err := getAllApps(ctx, dynamoClient, input, limit, cursor)
+	log.Printf("Debug-getAllSubscribedApps: apps: %+v", apps)
 	if err != nil {
 		log.Printf("Error querying apps: %v", err)
 		return createErrorResponse(500, "Error retrieving apps")
@@ -297,7 +414,7 @@ func handleGetAllApps(ctx context.Context, request events.APIGatewayV2HTTPReques
 		Count:      len(apps),
 		NextCursor: nextCursor,
 	}
-
+	log.Printf("Debug-getAllSubscribedApps: response: %+v", response)
 	return createSuccessResponse(200, response), nil
 }
 
@@ -307,7 +424,7 @@ func handleSubscribe(ctx context.Context, request events.APIGatewayV2HTTPRequest
 	claims := request.RequestContext.Authorizer.JWT.Claims
 	userID := claims["sub"]
 
-	log.Printf("Debug: handleSubscribe started with appID: %s, userId: %s", appID, userID)
+	log.Printf("Debug: handleSubscribe started with appID: %s, userID: %s", appID, userID)
 
 	if appID == "" {
 		return createErrorResponse(400, "appID is required")
@@ -335,6 +452,7 @@ func handleSubscribe(ctx context.Context, request events.APIGatewayV2HTTPRequest
 
 	err = insertSubscription(ctx, dynamoClient, subscriptionTableName, appID, userID)
 	if err != nil {
+		log.Printf("Debug: Error inserting subscription: %v", err)
 		return createErrorResponse(500, "Error creating subscription")
 	}
 
